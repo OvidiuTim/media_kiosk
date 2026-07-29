@@ -1,0 +1,25 @@
+{% extends "kiosk/base.html" %}
+{% block title %}{{ playlist.name }} · Media Kiosk{% endblock %}
+{% load static %}
+{% block extra_head %}<script src="{% static 'kiosk/vendor/Sortable.min.js' %}"></script>{% endblock %}
+{% block content %}
+<div class="page-heading d-flex flex-wrap justify-content-between align-items-end gap-3"><div><a class="back-link" href="{% url 'playlist_list' %}">← Playlisturi</a><p class="eyebrow mt-3">EDITOR DRAFT</p><h1>{{ playlist.name }}</h1><p>{% if playlist.published_version %}Versiunea publicată: v{{ playlist.published_version }} · orice modificare rămâne draft până la republicare.{% else %}Acest playlist nu a fost publicat încă.{% endif %}</p></div><div class="d-flex gap-2"><a class="btn btn-light" href="{% url 'playlist_preview' playlist.pk %}">Preview publicat</a><form method="post" action="{% url 'playlist_publish' playlist.pk %}">{% csrf_token %}<button class="btn btn-success" type="submit" {% if not items %}disabled{% endif %}>Publică versiune nouă</button></form></div></div>
+
+<div class="row g-4 mt-1">
+  <div class="col-xl-8">
+    <section class="content-card"><div class="section-heading"><div><p class="eyebrow">ORDINE REDARE</p><h2>Conținut playlist</h2></div><span class="drag-hint">Trage pentru reordonare</span></div>
+      <div id="playlist-items" class="playlist-items" data-reorder-url="{% url 'playlist_reorder' playlist.pk %}">
+      {% for item in items %}<article class="playlist-item" data-id="{{ item.pk }}" data-update-url="{% url 'playlist_item_update' playlist.pk item.pk %}" data-delete-url="{% url 'playlist_item_delete' playlist.pk item.pk %}">
+        <button class="drag-handle" type="button" aria-label="Reordonează">⠿</button><span class="position-number">{{ forloop.counter }}</span><div class="item-type {% if item.media_asset.media_type == 'video' %}video{% endif %}">{% if item.media_asset.media_type == 'image' %}▧{% else %}▶{% endif %}</div>
+        <div class="item-main"><strong>{{ item.media_asset.title }}</strong><small>{{ item.media_asset.get_media_type_display }} · {{ item.media_asset.file_size|filesizeformat }}</small></div>
+        {% if item.media_asset.media_type == 'image' %}<label class="duration-field"><span>Durată</span><input class="form-control form-control-sm js-duration" type="number" min="1" max="86400" value="{{ item.image_duration_seconds }}"><em>sec</em></label>{% else %}<span class="natural-duration">Durată naturală</span>{% endif %}
+        <label class="form-check form-switch mb-0"><input class="form-check-input js-active" type="checkbox" {% if item.is_active %}checked{% endif %} aria-label="Element activ"></label><button class="icon-button js-remove" type="button" aria-label="Elimină">×</button>
+      </article>{% empty %}<div class="empty-state" id="empty-playlist"><h3>Playlistul este gol</h3><p>Adaugă materiale din biblioteca din dreapta.</p></div>{% endfor %}
+      </div>
+      <div id="editor-feedback" class="small mt-3" aria-live="polite"></div>
+    </section>
+    <section class="content-card mt-4"><div class="section-heading"><div><p class="eyebrow">DETALII</p><h2>Setări playlist</h2></div></div><form method="post" class="d-grid gap-3">{% csrf_token %}{{ form.as_div }}<button class="btn btn-dark justify-self-start" type="submit">Salvează detaliile</button></form></section>
+  </div>
+  <div class="col-xl-4"><aside class="content-card library-panel"><div class="section-heading"><div><p class="eyebrow">BIBLIOTECĂ</p><h2>Adaugă material</h2></div></div><input class="form-control mb-3" id="asset-search" type="search" placeholder="Caută material…"><div id="asset-list" class="asset-list" data-add-url="{% url 'playlist_add_item' playlist.pk %}">{% for asset in available_assets %}<button class="asset-option" type="button" data-id="{{ asset.pk }}" data-title="{{ asset.title|lower }}"><span class="item-type {% if asset.media_type == 'video' %}video{% endif %}">{% if asset.media_type == 'image' %}▧{% else %}▶{% endif %}</span><span><strong>{{ asset.title }}</strong><small>{{ asset.get_media_type_display }} · {{ asset.file_size|filesizeformat }}</small></span><b>+</b></button>{% empty %}<div class="empty-state"><p>Nu există materiale active.</p><a href="{% url 'media_upload' %}">Încarcă unul</a></div>{% endfor %}</div></aside></div>
+</div>
+{% endblock %}

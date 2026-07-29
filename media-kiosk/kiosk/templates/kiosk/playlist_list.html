@@ -1,0 +1,10 @@
+{% extends "kiosk/base.html" %}
+{% block title %}Playlisturi · Media Kiosk{% endblock %}
+{% block content %}
+<div class="page-heading d-flex flex-wrap justify-content-between align-items-end gap-3"><div><p class="eyebrow">PROGRAMARE</p><h1>Playlisturi</h1><p>Pregătește conținutul în draft și publică-l când este gata.</p></div><a class="btn btn-primary" href="{% url 'playlist_create' %}">+ Playlist nou</a></div>
+<div class="content-card mt-4 p-0 overflow-hidden"><div class="table-responsive"><table class="table align-middle mb-0"><thead><tr><th>Nume</th><th>Conținut</th><th>Versiune publicată</th><th>Tablete</th><th>Stare</th><th></th></tr></thead><tbody>
+{% for playlist in playlists %}<tr><td><strong>{{ playlist.name }}</strong><small class="d-block text-secondary">{{ playlist.description|truncatechars:70 }}</small></td><td>{{ playlist.items.count }} elemente</td><td>{% if playlist.published_version %}v{{ playlist.published_version }} · {{ playlist.published_at|date:"d M, H:i" }}{% else %}<span class="text-secondary">Nepublicat</span>{% endif %}</td><td>{{ playlist.devices.count }}</td><td><span class="status-pill {% if playlist.is_active %}is-active{% else %}is-off{% endif %}">{% if playlist.is_active %}Activ{% else %}Inactiv{% endif %}</span></td><td class="text-end"><a class="btn btn-sm btn-light" href="{% url 'playlist_preview' playlist.pk %}">Preview</a> <a class="btn btn-sm btn-dark" href="{% url 'playlist_edit' playlist.pk %}">Editează</a></td></tr>
+{% empty %}<tr><td colspan="6" class="empty-state">Nu există playlisturi. <a href="{% url 'playlist_create' %}">Creează primul playlist</a>.</td></tr>{% endfor %}
+</tbody></table></div></div>
+{% endblock %}
+

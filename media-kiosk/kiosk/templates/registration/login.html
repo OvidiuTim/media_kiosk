@@ -1,0 +1,22 @@
+{% extends "kiosk/base.html" %}
+{% block title %}Autentificare · Media Kiosk{% endblock %}
+{% block main_class %}login-shell{% endblock %}
+{% block content %}
+<div class="login-panel">
+  <div class="login-brand"><span class="brand-mark brand-mark-lg">MK</span><span>Media Kiosk</span></div>
+  <p class="eyebrow mt-5">PANOU DE CONTROL</p>
+  <h1>Bine ai revenit.</h1>
+  <p class="text-secondary mb-4">Autentifică-te pentru a administra materialele, playlisturile și tabletele.</p>
+  {% if form.errors %}<div class="alert alert-danger">Utilizatorul sau parola nu sunt corecte.</div>{% endif %}
+  <form method="post" class="d-grid gap-3">
+    {% csrf_token %}
+    <div><label class="form-label" for="id_username">Utilizator</label><input class="form-control form-control-lg" type="text" name="username" autofocus required id="id_username"></div>
+    <div><label class="form-label" for="id_password">Parolă</label><input class="form-control form-control-lg" type="password" name="password" required id="id_password"></div>
+    {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+    <button class="btn btn-primary btn-lg mt-2" type="submit">Intră în panou</button>
+  </form>
+  <p class="login-note">Accesul este disponibil doar utilizatorilor autorizați.</p>
+</div>
+<div class="login-visual" aria-hidden="true"><div class="screen screen-one"></div><div class="screen screen-two"></div><div class="visual-copy"><span>CONTINUT MEREU PROASPAT</span><strong>Controlează fiecare ecran, dintr-un singur loc.</strong></div></div>
+{% endblock %}
+

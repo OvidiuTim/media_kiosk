@@ -1,0 +1,32 @@
+from django.contrib import admin
+
+from .models import Device, MediaAsset, Playlist, PlaylistItem, PublishedPlaylist, PublishedPlaylistItem
+
+
+class PlaylistItemInline(admin.TabularInline):
+    model = PlaylistItem
+    extra = 0
+
+
+@admin.register(Playlist)
+class PlaylistAdmin(admin.ModelAdmin):
+    list_display = ("name", "is_active", "published_version", "published_at")
+    inlines = [PlaylistItemInline]
+
+
+@admin.register(Device)
+class DeviceAdmin(admin.ModelAdmin):
+    list_display = ("name", "is_active", "assigned_playlist", "last_seen_at")
+    readonly_fields = ("device_key", "last_seen_at")
+
+
+@admin.register(MediaAsset)
+class MediaAssetAdmin(admin.ModelAdmin):
+    list_display = ("title", "media_type", "file_size", "is_active", "created_at")
+    list_filter = ("media_type", "is_active")
+    search_fields = ("title", "original_filename")
+
+
+admin.site.register(PublishedPlaylist)
+admin.site.register(PublishedPlaylistItem)
+

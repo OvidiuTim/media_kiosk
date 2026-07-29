@@ -1,0 +1,6 @@
+{% extends "kiosk/base.html" %}
+{% block title %}Șterge material · Media Kiosk{% endblock %}
+{% block content %}
+<div class="narrow-page"><a class="back-link" href="{% url 'media_list' %}">← Înapoi la materiale</a><div class="content-card danger-card mt-4"><span class="danger-icon">!</span><h1>Ștergi „{{ asset.title }}”?</h1><p>Fișierul va fi eliminat definitiv din Cloudflare R2 și nu va putea fi recuperat.</p>{% if usage_count %}<div class="alert alert-warning">Materialul este folosit în {{ usage_count }} poziții draft/publicate. Pentru a continua, confirmă eliminarea lui din toate playlisturile.</div>{% endif %}<form method="post">{% csrf_token %}{% if usage_count %}<label class="form-check mb-4"><input class="form-check-input" type="checkbox" name="remove_everywhere" value="1" required><span class="form-check-label">Da, elimină materialul din toate playlisturile.</span></label>{% endif %}<div class="d-flex gap-2"><a class="btn btn-light" href="{% url 'media_list' %}">Păstrează</a><button class="btn btn-danger" type="submit">Șterge definitiv</button></div></form></div></div>
+{% endblock %}
+

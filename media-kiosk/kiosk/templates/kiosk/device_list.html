@@ -1,0 +1,9 @@
+{% extends "kiosk/base.html" %}
+{% block title %}Tablete · Media Kiosk{% endblock %}
+{% block content %}
+<div class="page-heading d-flex flex-wrap justify-content-between align-items-end gap-3"><div><p class="eyebrow">DISPOZITIVE</p><h1>Tablete</h1><p>Asociază un playlist și urmărește ultima conexiune.</p></div><a class="btn btn-primary" href="{% url 'device_create' %}">+ Adaugă tabletă</a></div>
+<div class="content-card mt-4 p-0 overflow-hidden"><div class="table-responsive"><table class="table align-middle mb-0"><thead><tr><th>Dispozitiv</th><th>Playlist asociat</th><th>Ultimul heartbeat</th><th>Stare</th><th></th></tr></thead><tbody>
+{% for device in devices %}<tr><td><strong>{{ device.name }}</strong><small class="d-block text-secondary font-monospace">{{ device.device_key }}</small></td><td>{{ device.assigned_playlist|default:"Neasociat" }}</td><td>{{ device.last_seen_at|date:"d M Y, H:i:s"|default:"Niciodată" }}</td><td><span class="status-pill {% if device.is_active %}is-active{% else %}is-off{% endif %}">{% if device.is_active %}Activă{% else %}Inactivă{% endif %}</span></td><td class="text-end"><a class="btn btn-sm btn-dark" href="{% url 'device_edit' device.pk %}">Editează</a></td></tr>{% empty %}<tr><td colspan="5" class="empty-state">Nu există dispozitive. <a href="{% url 'device_create' %}">Adaugă prima tabletă</a>.</td></tr>{% endfor %}
+</tbody></table></div></div>
+{% endblock %}
+

@@ -1,0 +1,42 @@
+{% extends "kiosk/base.html" %}
+{% block title %}Dashboard · Media Kiosk{% endblock %}
+{% block content %}
+<div class="page-heading d-flex flex-wrap justify-content-between align-items-end gap-3">
+  <div><p class="eyebrow">PREZENTARE GENERALĂ</p><h1>Salut, {{ user.first_name|default:user.username }}.</h1><p>Tot ce ai nevoie pentru rețeaua ta de ecrane.</p></div>
+  <div class="d-flex gap-2"><a class="btn btn-light" href="{% url 'playlist_create' %}">Playlist nou</a><a class="btn btn-primary" href="{% url 'media_upload' %}">Încarcă material</a></div>
+</div>
+
+<div class="stats-grid mt-4">
+  <a class="stat-card coral" href="{% url 'media_list' %}?type=image"><span class="stat-icon">▧</span><div><strong>{{ image_count }}</strong><span>Imagini</span></div></a>
+  <a class="stat-card violet" href="{% url 'media_list' %}?type=video"><span class="stat-icon">▶</span><div><strong>{{ video_count }}</strong><span>Videoclipuri</span></div></a>
+  <a class="stat-card blue" href="{% url 'playlist_list' %}"><span class="stat-icon">☷</span><div><strong>{{ playlist_count }}</strong><span>Playlisturi</span></div></a>
+  <a class="stat-card green" href="{% url 'device_list' %}"><span class="stat-icon">▣</span><div><strong>{{ device_count }}</strong><span>Tablete</span></div></a>
+</div>
+
+<div class="row g-4 mt-1">
+  <div class="col-xl-8">
+    <section class="content-card h-100">
+      <div class="section-heading"><div><p class="eyebrow">STAREA REȚELEI</p><h2>Tablete recente</h2></div><a href="{% url 'device_list' %}">Vezi toate →</a></div>
+      <div class="table-responsive">
+        <table class="table align-middle mb-0">
+          <thead><tr><th>Dispozitiv</th><th>Playlist</th><th>Ultima activitate</th><th>Stare</th></tr></thead>
+          <tbody>
+          {% for device in recent_devices %}
+            <tr><td><strong>{{ device.name }}</strong></td><td>{{ device.assigned_playlist|default:"Neasociat" }}</td><td>{{ device.last_seen_at|date:"d M Y, H:i"|default:"Niciodată" }}</td><td><span class="status-pill {% if device.is_active %}is-active{% else %}is-off{% endif %}">{% if device.is_active %}Activă{% else %}Inactivă{% endif %}</span></td></tr>
+          {% empty %}<tr><td colspan="4" class="empty-state">Nu există încă tablete. <a href="{% url 'device_create' %}">Adaugă prima tabletă</a>.</td></tr>{% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+  <div class="col-xl-4">
+    <section class="health-card h-100">
+      <p class="eyebrow">MONITORIZARE</p><h2>Starea conexiunilor</h2>
+      <div class="health-number"><strong>{{ active_device_count }}</strong><span>tablete active</span></div>
+      <div class="health-line"><span>Fără heartbeat recent</span><strong class="{% if stale_device_count %}text-warning{% endif %}">{{ stale_device_count }}</strong></div>
+      <p class="small text-secondary mb-0">O tabletă este considerată recentă dacă a trimis heartbeat în ultimele 5 minute.</p>
+    </section>
+  </div>
+</div>
+{% endblock %}
+

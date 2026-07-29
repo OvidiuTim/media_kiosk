@@ -1,0 +1,53 @@
+{% load static %}
+<!doctype html>
+<html lang="ro">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Media Kiosk{% endblock %}</title>
+  <link rel="icon" href="data:,">
+  <link href="{% static 'kiosk/vendor/bootstrap.min.css' %}" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{% static 'kiosk/css/app.css' %}">
+  {% block extra_head %}{% endblock %}
+</head>
+<body>
+{% if user.is_authenticated %}
+  <nav class="navbar navbar-expand-lg kiosk-nav sticky-top">
+    <div class="container-fluid px-lg-4">
+      <a class="navbar-brand d-flex align-items-center gap-2" href="{% url 'dashboard' %}">
+        <span class="brand-mark">MK</span><span>Media Kiosk</span>
+      </a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav" aria-label="Deschide meniul"><span class="navbar-toggler-icon"></span></button>
+      <div class="collapse navbar-collapse" id="mainNav">
+        <ul class="navbar-nav ms-lg-4 me-auto mb-2 mb-lg-0 gap-lg-1">
+          <li class="nav-item"><a class="nav-link {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}" href="{% url 'dashboard' %}">Dashboard</a></li>
+          <li class="nav-item"><a class="nav-link {% if 'media' in request.resolver_match.url_name %}active{% endif %}" href="{% url 'media_list' %}">Materiale</a></li>
+          <li class="nav-item"><a class="nav-link {% if 'playlist' in request.resolver_match.url_name %}active{% endif %}" href="{% url 'playlist_list' %}">Playlisturi</a></li>
+          <li class="nav-item"><a class="nav-link {% if 'device' in request.resolver_match.url_name %}active{% endif %}" href="{% url 'device_list' %}">Tablete</a></li>
+        </ul>
+        <div class="d-flex align-items-center gap-3">
+          <span class="user-chip d-none d-md-inline">{{ user.get_full_name|default:user.username }}</span>
+          <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="btn btn-sm btn-outline-light" type="submit">Ieșire</button></form>
+        </div>
+      </div>
+    </div>
+  </nav>
+{% endif %}
+
+<main class="{% block main_class %}container-fluid px-3 px-lg-4 py-4 py-lg-5{% endblock %}">
+  {% if messages %}
+    <div class="message-stack">
+      {% for message in messages %}<div class="alert alert-{{ message.tags|default:'info' }} alert-dismissible fade show shadow-sm" role="alert">{{ message }}<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Închide"></button></div>{% endfor %}
+    </div>
+  {% endif %}
+  {% block content %}{% endblock %}
+</main>
+
+<script src="{% static 'kiosk/vendor/bootstrap.bundle.min.js' %}"></script>
+<script src="{% static 'kiosk/js/app.js' %}"></script>
+{% block extra_js %}{% endblock %}
+</body>
+</html>

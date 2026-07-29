@@ -1,0 +1,9 @@
+{% extends "kiosk/base.html" %}
+{% block title %}Preview {{ playlist.name }} · Media Kiosk{% endblock %}
+{% block main_class %}preview-page{% endblock %}
+{% block content %}
+<div class="preview-toolbar"><div><a href="{% url 'playlist_edit' playlist.pk %}">← Înapoi la editor</a><strong>{{ playlist.name }}</strong>{% if snapshot %}<span>Versiunea {{ snapshot.version }}</span>{% endif %}</div><button class="btn btn-light btn-sm" id="fullscreen-button" type="button">Ecran complet</button></div>
+<div id="preview-stage" class="preview-stage"><div class="preview-empty"><strong>Preview publicat</strong><span>{% if preview_items %}Playerul pornește imediat.{% else %}Nu există elemente active într-o versiune publicată.{% endif %}</span></div><div class="preview-caption" id="preview-caption"></div></div>
+{{ preview_items|json_script:"preview-data" }}
+{% endblock %}
+
