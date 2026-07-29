@@ -1,7 +1,6 @@
 Django==5.2.16
 djangorestframework==3.16.1
-boto3==1.43.58
+Pillow==12.3.0
 python-dotenv==1.2.2
 psycopg[binary]==3.3.4
 gunicorn==23.0.0
-

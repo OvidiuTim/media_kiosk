@@ -20,6 +20,7 @@ if (uploadForm) {
   const errorBox = document.querySelector("#upload-error");
   const progress = document.querySelector("#upload-progress");
   const bar = progress.querySelector(".progress-bar");
+  const status = document.querySelector("#upload-status");
   const drop = document.querySelector(".upload-drop");
   const showFile = () => {
     const file = fileInput.files[0];
@@ -37,17 +38,12 @@ if (uploadForm) {
     const file = fileInput.files[0];
     if (!file) return;
     const button = uploadForm.querySelector("button[type=submit]");
-    button.disabled = true; errorBox.classList.add("d-none"); progress.classList.remove("d-none");
-    try {
-      const presigned = await jsonPost(uploadForm.dataset.presignUrl, {filename: file.name, mime_type: file.type, file_size: file.size, title: document.querySelector("#upload-title").value});
-      await new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest(); xhr.open("PUT", presigned.upload_url); xhr.setRequestHeader("Content-Type", file.type);
-        xhr.upload.onprogress = (e) => { if (e.lengthComputable) { const pct = Math.round(e.loaded / e.total * 100); bar.style.width = pct + "%"; bar.textContent = pct + "%"; } };
-        xhr.onload = () => xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error("R2 a refuzat fișierul.")); xhr.onerror = () => reject(new Error("Conexiunea către R2 a eșuat.")); xhr.send(file);
-      });
-      const confirmed = await jsonPost(uploadForm.dataset.confirmUrl, {upload_token: presigned.upload_token});
-      window.location.assign(confirmed.redirect_url);
-    } catch (error) { errorBox.textContent = error.message; errorBox.classList.remove("d-none"); button.disabled = false; }
+    button.disabled = true; button.textContent = "Se încarcă…"; errorBox.classList.add("d-none"); progress.classList.remove("d-none"); status.classList.remove("d-none"); status.textContent = "Fișierul este trimis către server…";
+    const xhr = new XMLHttpRequest(); xhr.open("POST", uploadForm.dataset.uploadUrl); xhr.setRequestHeader("X-CSRFToken", decodeURIComponent(getCookie("csrftoken")));
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) { const pct = Math.round(e.loaded / e.total * 100); bar.style.width = pct + "%"; bar.textContent = pct + "%"; progress.setAttribute("aria-valuenow", String(pct)); if (pct === 100) status.textContent = "Upload finalizat. Serverul verifică fișierul și calculează checksum-ul…"; } };
+    xhr.onload = () => { let body = {}; try { body = JSON.parse(xhr.responseText); } catch (_) { body = {}; } if (xhr.status >= 200 && xhr.status < 300 && body.success) { status.textContent = "Material salvat. Se deschide biblioteca…"; window.location.assign(body.redirect_url); return; } errorBox.textContent = body.error || "Uploadul nu a putut fi finalizat."; errorBox.classList.remove("d-none"); status.classList.add("d-none"); button.disabled = false; button.textContent = "Încarcă pe server"; };
+    xhr.onerror = () => { errorBox.textContent = "Conexiunea cu serverul a fost întreruptă."; errorBox.classList.remove("d-none"); status.classList.add("d-none"); button.disabled = false; button.textContent = "Încarcă pe server"; };
+    xhr.send(new FormData(uploadForm));
   });
 }
 
@@ -80,11 +76,10 @@ if (previewStage) {
     if (!items.length) return;
     const item = items[current]; current = (current + 1) % items.length; caption.textContent = item.title;
     const node = document.createElement(item.type === "video" ? "video" : "img"); node.src = item.url; node.alt = item.title;
-    if (item.type === "video") { node.autoplay = true; node.muted = false; node.playsInline = true; node.addEventListener("ended", playNext); node.addEventListener("error", () => timer = setTimeout(playNext, 2000)); }
+    if (item.type === "video") { node.autoplay = true; node.preload = "auto"; node.playsInline = true; node.addEventListener("ended", playNext); node.addEventListener("error", () => timer = setTimeout(playNext, 2000)); node.addEventListener("canplay", () => node.play().catch(() => { node.muted = true; node.play().catch(() => timer = setTimeout(playNext, 2000)); }), {once:true}); }
     else { timer = setTimeout(playNext, Math.max(1, item.duration) * 1000); }
     previewStage.prepend(node);
   };
   playNext();
   document.querySelector("#fullscreen-button")?.addEventListener("click", () => previewStage.requestFullscreen?.());
 }
-

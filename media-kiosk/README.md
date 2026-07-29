@@ -1,133 +1,94 @@
 # Media Kiosk — etapa 1
+# superuser admin admin
 
-Panou web Django în limba română pentru administrarea imaginilor, videoclipurilor, playlisturilor și tabletelor. Fișierele sunt încărcate direct din browser într-un bucket privat Cloudflare R2; serverul păstrează numai metadatele. Aplicația Android nu face parte din această etapă.
+Panou web Django în limba română pentru administrarea imaginilor, videoclipurilor, playlisturilor și tabletelor. Fișierele sunt stocate pe discul serverului, iar baza de date păstrează numai calea și metadatele. Aplicația Android nu face parte din această etapă.
 
-Arhitectura de publicare separă draftul (`PlaylistItem`) de ultima versiune publicată (`PublishedPlaylist` și `PublishedPlaylistItem`). La publicare, draftul este copiat într-un snapshot atomic și `published_version` este incrementat. API-ul tabletelor citește exclusiv acel snapshot, așadar editările ulterioare rămân invizibile până la următoarea publicare.
+Draftul (`PlaylistItem`) este separat de ultima versiune publicată (`PublishedPlaylist` și `PublishedPlaylistItem`). API-ul tabletelor citește exclusiv snapshot-ul publicat. URL-urile media sunt stabile, iar checksum-ul SHA-256 permite aplicației să recunoască fișierele deja descărcate.
 
-## 1. Instalarea locală
+## Instalare locală
 
-Cerințe: Python 3.11+, un cont Cloudflare și, pentru producție, PostgreSQL.
-
-```bash
-cd media-kiosk
-python3.11 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-În dezvoltare, dacă `DATABASE_URL` rămâne gol, aplicația folosește automat SQLite.
-
-## 2. Crearea mediului virtual
+Cerințe: Python 3.11+ și, pentru producție, PostgreSQL și Nginx.
 
 ```bash
+cd /Users/xux/Documents/GitHub/media_kiosk/media-kiosk
 python3.11 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 pip install -r requirements.txt
-```
-
-Pe Windows PowerShell, activarea se face cu `.venv\Scripts\Activate.ps1`.
-
-## 3. Configurarea `.env`
-
-```bash
 cp .env.example .env
-```
-
-Completează `DJANGO_SECRET_KEY`, gazdele permise și valorile R2. În producție adaugă și originea HTTPS completă în `DJANGO_CSRF_TRUSTED_ORIGINS`. Pentru PostgreSQL setează, de exemplu:
-
-```env
-DATABASE_URL=postgresql://media_kiosk:parola@127.0.0.1:5432/media_kiosk
-```
-
-Nu include fișierul `.env` în Git și nu expune credențialele în browser, loguri sau capturi de ecran.
-
-## 4. Rularea migrațiilor
-
-```bash
 python manage.py migrate
+python manage.py createsuperuser
+python manage.py runserver 127.0.0.1:8010
 ```
 
-Opțional, creează date demonstrative idempotente:
+Deschide `http://127.0.0.1:8010/login/`. Biblioteca este la `/materials/`; prefixul `/media/` este rezervat exclusiv fișierelor și poate fi livrat direct de Nginx în producție.
+
+Pentru date demonstrative locale:
 
 ```bash
 python manage.py create_demo_data
 ```
 
-Obiectele media demo sunt doar metadate și trebuie încărcate separat în R2 sub cheile indicate de comandă.
+Comanda creează o imagine reală în `MEDIA_ROOT`, un playlist publicat și o tabletă demonstrativă.
 
-## 5. Crearea superuserului
+## Configurarea `.env`
 
-```bash
-python manage.py createsuperuser
-```
-
-Panoul acceptă numai utilizatori autentificați cu `is_staff=True`. Nu există înregistrare publică.
-
-## 6. Pornirea serverului
-
-```bash
-python manage.py runserver
-```
-
-Deschide `http://127.0.0.1:8000/login/`. Interfața administrativă Django clasică rămâne disponibilă la `/django-admin/`.
-
-## 7. Crearea bucketului Cloudflare R2
-
-În Cloudflare Dashboard, deschide **R2 Object Storage**, creează un bucket și păstrează accesul public dezactivat. Numele bucketului se copiază în `R2_BUCKET_NAME`. Nu configura un domeniu public pentru acest flux.
-
-## 8. Generarea cheilor API R2
-
-În **R2 → Manage R2 API Tokens**, creează un token limitat la bucketul aplicației, cu permisiuni de citire și scriere obiecte. Completează fără ghilimele:
+Configurația minimă de dezvoltare:
 
 ```env
-R2_ACCOUNT_ID=
-R2_ACCESS_KEY_ID=
-R2_SECRET_ACCESS_KEY=
-R2_BUCKET_NAME=
-R2_ENDPOINT_URL=https://ACCOUNT_ID.r2.cloudflarestorage.com
-R2_PRESIGNED_URL_EXPIRATION=86400
+DJANGO_SECRET_KEY=schimba-ma-cu-o-valoare-lunga-si-aleatoare
+DJANGO_DEBUG=True
+DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
+DJANGO_CSRF_TRUSTED_ORIGINS=
+DATABASE_URL=
+
+MEDIA_STORAGE_BACKEND=local
+MEDIA_ROOT=
+MEDIA_URL=/media/
 MAX_IMAGE_UPLOAD_MB=20
 MAX_VIDEO_UPLOAD_MB=1000
+MAX_TOTAL_MEDIA_GB=20
+MIN_FREE_DISK_GB=2
 ```
 
-În producție se recomandă injectarea acestor valori dintr-un secret manager.
+Dacă `MEDIA_ROOT` este gol, se folosește automat `PROJECT_ROOT/media/`. În producție setează o cale absolută:
 
-## 9. Configurarea CORS
-
-Uploadul este un `PUT` direct din browser către R2. În setările bucketului adaugă o politică CORS; înlocuiește originile cu domeniile reale și nu folosi `*` în producție:
-
-```json
-[
-  {
-    "AllowedOrigins": ["http://127.0.0.1:8000", "http://localhost:8000", "https://kiosk.exemplu.ro"],
-    "AllowedMethods": ["GET", "PUT", "HEAD"],
-    "AllowedHeaders": ["Content-Type"],
-    "ExposeHeaders": ["ETag"],
-    "MaxAgeSeconds": 3600
-  }
-]
+```env
+MEDIA_ROOT=/var/www/media-kiosk/media
+MEDIA_URL=/media/
+DATABASE_URL=postgresql://media_kiosk:PAROLA@127.0.0.1:5432/media_kiosk
 ```
 
-Bucketul rămâne privat. URL-urile de upload și download sunt semnate temporar de server.
+`MAX_TOTAL_MEDIA_GB` limitează întreaga bibliotecă, iar `MIN_FREE_DISK_GB` păstrează o rezervă pe partiție. Fișierele mai mari de aproximativ 2,5 MB folosesc handlerul temporar standard Django și nu sunt încărcate integral în RAM.
 
-## 10. Testarea uploadului
+## Upload și validare
 
-Autentifică-te, deschide **Materiale → Încarcă material**, selectează un JPG/JPEG/PNG/WEBP de cel mult 20 MB sau un MP4 de cel mult 1000 MB. Pentru video: MP4, H.264, AAC, maximum 1080p. Browserul cere URL-ul semnat, face upload direct și confirmă obiectul; serverul verifică dimensiunea și MIME-ul prin `HeadObject` înainte de a crea metadatele.
+Pagina **Materiale → Încarcă material** trimite fișierul către Django prin `XMLHttpRequest`, cu CSRF și progres vizual. Serverul verifică:
 
-Dacă uploadul este refuzat de browser, verifică originile CORS, ora sistemului, endpointul R2 și permisiunile tokenului.
+- extensia și MIME-ul pentru JPG, JPEG, PNG, WEBP și MP4;
+- conținutul imaginilor cu Pillow;
+- structura ISO BMFF și blocul `ftyp` pentru MP4;
+- limita individuală, limita totală și spațiul liber;
+- checksum-ul SHA-256, calculat în chunks.
 
-## 11. Exemplu `curl` pentru API-ul tabletei
+Fișierul primește un nume UUID, de exemplu:
+
+```text
+media/kiosk/images/2026/07/2dc52e77f38749e7ba36135f28ffb70d.png
+media/kiosk/videos/2026/07/5d63171ce2d0441d93f40b234a03c207.mp4
+```
+
+## API-ul tabletei
 
 ```bash
-curl -i http://127.0.0.1:8000/api/kiosk/playlist/ \
+curl -i http://127.0.0.1:8010/api/kiosk/playlist/ \
   -H "X-Device-Key: UUID-UL-TABLETEI"
 ```
 
-Pentru cache condiționat:
+Cache condiționat:
 
 ```bash
-curl -i http://127.0.0.1:8000/api/kiosk/playlist/ \
+curl -i http://127.0.0.1:8010/api/kiosk/playlist/ \
   -H "X-Device-Key: UUID-UL-TABLETEI" \
   -H 'If-None-Match: "playlist-2-v4"'
 ```
@@ -135,40 +96,153 @@ curl -i http://127.0.0.1:8000/api/kiosk/playlist/ \
 Heartbeat:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/kiosk/heartbeat/ \
+curl -X POST http://127.0.0.1:8010/api/kiosk/heartbeat/ \
   -H "X-Device-Key: UUID-UL-TABLETEI"
 ```
 
-## 12. Instrucțiuni pentru rularea testelor
+URL-ul fiecărui material este construit din request; domeniul nu este hardcodat.
 
-Testele nu contactează Cloudflare; serviciul R2 este mock-uit.
+## Teste
+
+Testele folosesc un `TemporaryDirectory` și nu scriu în directorul media real.
 
 ```bash
 python manage.py check
+python manage.py makemigrations --check --dry-run
 python manage.py test
 ```
 
-Pentru a verifica dacă modelele sunt sincronizate cu migrațiile:
+## Pregătirea directoarelor în producție
+
+Exemplul folosește utilizatorul de serviciu `media-kiosk` pentru Gunicorn și grupul `www-data` pentru Nginx:
 
 ```bash
-python manage.py makemigrations --check --dry-run
+sudo useradd --system --home /var/www/media-kiosk --shell /usr/sbin/nologin media-kiosk
+sudo install -d -o media-kiosk -g www-data -m 0750 /var/www/media-kiosk
+sudo install -d -o media-kiosk -g www-data -m 2750 /var/www/media-kiosk/media
+sudo install -d -o media-kiosk -g www-data -m 0750 /var/www/media-kiosk/staticfiles
 ```
 
-## 13. Pașii recomandați pentru deploy cu Gunicorn și Nginx
+Gunicorn trebuie să poată scrie în `MEDIA_ROOT`; Nginx trebuie să poată traversa directoarele și citi fișierele. Django creează fișiere cu `0640` și directoare cu `0750`. Bitul setgid de pe directorul media păstrează grupul `www-data`. Nu folosi permisiuni `777`.
 
-1. Creează un utilizator Linux dedicat și copiază aplicația într-un director fără drepturi de scriere publică.
-2. Creează mediul virtual, instalează `requirements.txt` și configurează `.env` cu `DJANGO_DEBUG=False`, un `DJANGO_SECRET_KEY` puternic, `DJANGO_ALLOWED_HOSTS`, PostgreSQL și R2.
-3. Rulează `python manage.py migrate` și `python manage.py collectstatic --noinput`.
-4. Pornește Gunicorn prin systemd, de exemplu: `gunicorn media_kiosk.wsgi:application --workers 3 --bind 127.0.0.1:8001`.
-5. Configurează Nginx ca reverse proxy către `127.0.0.1:8001`, servește `/static/`, limitează dimensiunea cererilor normale și setează headerele proxy corecte.
-6. Activează HTTPS cu un certificat valid, apoi setează `CSRF_TRUSTED_ORIGINS`, `SECURE_SSL_REDIRECT=True`, cookie-uri secure și HSTS în configurația Django de producție.
-7. Restricționează firewallul, protejează fișierul de mediu, rotește cheile R2 și configurează backup-uri PostgreSQL și monitorizarea serviciilor.
+Verifică identitatea proceselor și permisiunile:
 
-Nu este necesară mărirea `client_max_body_size` la 1 GB pentru uploadurile media: fișierele merg direct din browser în R2.
+```bash
+ps -eo user,group,cmd | grep -E 'gunicorn|nginx'
+namei -l /var/www/media-kiosk/media
+sudo -u media-kiosk test -w /var/www/media-kiosk/media
+sudo -u www-data test -r /var/www/media-kiosk/media
+```
 
-## Endpointuri principale
+## Gunicorn prin systemd
 
-- Panou: `/`, `/media/`, `/playlists/`, `/devices/`
-- API tabletă: `GET /api/kiosk/playlist/`
-- Heartbeat: `POST /api/kiosk/heartbeat/`
-- Autentificare tabletă: antetul `X-Device-Key`
+Exemplu `/etc/systemd/system/media-kiosk.service`:
+
+```ini
+[Unit]
+Description=Media Kiosk Django
+After=network.target postgresql.service
+
+[Service]
+User=media-kiosk
+Group=www-data
+WorkingDirectory=/var/www/media-kiosk/app
+EnvironmentFile=/var/www/media-kiosk/app/.env
+ExecStart=/var/www/media-kiosk/app/.venv/bin/gunicorn media_kiosk.wsgi:application --workers 3 --bind 127.0.0.1:8001 --timeout 3600 --access-logfile - --error-logfile -
+Restart=on-failure
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Aplică migrațiile și fișierele statice înainte de restart:
+
+```bash
+sudo -u media-kiosk /var/www/media-kiosk/app/.venv/bin/python /var/www/media-kiosk/app/manage.py migrate
+sudo -u media-kiosk /var/www/media-kiosk/app/.venv/bin/python /var/www/media-kiosk/app/manage.py collectstatic --noinput
+sudo systemctl daemon-reload
+sudo systemctl enable --now media-kiosk
+```
+
+## Configurare Nginx completă
+
+Nginx deservește media direct de pe disc. Handlerul static Nginx suportă nativ Range Requests, `206 Partial Content`, seek și reluarea descărcărilor; videoclipurile nu trec prin Gunicorn.
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name kiosk.exemplu.ro;
+
+    client_max_body_size 1024M;
+    client_body_timeout 3600s;
+    send_timeout 3600s;
+
+    location ^~ /media/ {
+        alias /var/www/media-kiosk/media/;
+        access_log off;
+        add_header Accept-Ranges "bytes" always;
+        add_header Cache-Control "public, max-age=86400" always;
+    }
+
+    location ^~ /static/ {
+        alias /var/www/media-kiosk/staticfiles/;
+        access_log off;
+        add_header Cache-Control "public, max-age=604800" always;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:8001;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 3600s;
+        proxy_read_timeout 3600s;
+    }
+}
+```
+
+Păstrează `include /etc/nginx/mime.types;` în blocul `http` al configurației globale, astfel încât MP4 să fie livrat ca `video/mp4`. Buffering-ul implicit Nginx folosește fișiere temporare pentru requesturi mari; partiția configurată prin `client_body_temp_path` trebuie să aibă suficient spațiu.
+
+Verifică și reîncarcă:
+
+```bash
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+## Verificarea Range Requests și a spațiului
+
+```bash
+curl -I https://kiosk.exemplu.ro/media/kiosk/videos/2026/07/UUID.mp4
+curl -sS -D - -o /dev/null \
+  -H 'Range: bytes=0-1023' \
+  https://kiosk.exemplu.ro/media/kiosk/videos/2026/07/UUID.mp4
+```
+
+Al doilea răspuns trebuie să conțină `HTTP/1.1 206 Partial Content`, `Content-Range: bytes 0-1023/...`, `Content-Length: 1024` și `Accept-Ranges: bytes`.
+
+Verifică spațiul și dimensiunea bibliotecii:
+
+```bash
+df -h /var/www/media-kiosk/media
+du -sh /var/www/media-kiosk/media
+```
+
+## Backup
+
+Baza PostgreSQL conține metadatele, playlisturile și dispozitivele, nu conținutul video:
+
+```bash
+sudo -u postgres pg_dump -Fc media_kiosk > media_kiosk_$(date +%F).dump
+```
+
+Pentru SQLite, oprește temporar Gunicorn și copiază `db.sqlite3`. Fișierele media se salvează separat; poți exclude videoclipurile dacă politica de backup permite reîncărcarea lor:
+
+```bash
+rsync -a --exclude='kiosk/videos/' /var/www/media-kiosk/media/ /backup/media-kiosk-media/
+```
+
+Testează periodic restaurarea bazei și păstrează cel puțin inventarul căilor și checksum-urilor chiar dacă videoclipurile mari nu intră în fiecare backup.

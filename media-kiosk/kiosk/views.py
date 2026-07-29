@@ -1,22 +1,25 @@
 import json
+import logging
 
 from django.contrib import messages
 from django.contrib.admin.views.decorators import staff_member_required
-from django.core import signing
-from django.core.exceptions import ImproperlyConfigured, ValidationError
-from django.db import IntegrityError, transaction
+from django.conf import settings
+from django.core.exceptions import ValidationError
+from django.core.files.storage import default_storage
+from django.db import transaction
 from django.db.models import Max, Q
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
-from django.views.decorators.http import require_GET, require_http_methods, require_POST
+from django.urls import reverse
+from django.views.decorators.http import require_http_methods, require_POST
 
-from .forms import DeviceForm, MediaAssetForm, PlaylistForm
+from .forms import DeviceForm, MediaAssetForm, MediaUploadForm, PlaylistForm
 from .models import Device, MediaAsset, Playlist, PlaylistItem
-from .services import (
-    R2Service, generate_object_key, make_upload_token, read_upload_token,
-    valid_checksum, validate_upload,
-)
+from .services import storage_stats
+
+
+logger = logging.getLogger(__name__)
 
 
 def json_body(request):
@@ -26,17 +29,23 @@ def json_body(request):
         raise ValidationError("Conținut JSON invalid.")
 
 
-def preview_url(object_key):
-    try:
-        return R2Service().presign_download(object_key)
-    except Exception:
+def preview_url(file_name):
+    if not file_name or not default_storage.exists(file_name):
         return ""
+    return default_storage.url(file_name)
+
+
+def first_form_error(form):
+    for errors in form.errors.values():
+        if errors:
+            return str(errors[0])
+    return "Datele trimise nu sunt valide."
 
 
 @staff_member_required(login_url="login")
 def dashboard(request):
     stale_before = timezone.now() - timezone.timedelta(minutes=5)
-    return render(request, "kiosk/dashboard.html", {
+    context = {
         "image_count": MediaAsset.objects.filter(media_type="image").count(),
         "video_count": MediaAsset.objects.filter(media_type="video").count(),
         "playlist_count": Playlist.objects.count(),
@@ -46,7 +55,9 @@ def dashboard(request):
             Q(last_seen_at__lt=stale_before) | Q(last_seen_at__isnull=True)
         ).count(),
         "recent_devices": Device.objects.select_related("assigned_playlist").order_by("-last_seen_at")[:6],
-    })
+    }
+    context.update(storage_stats())
+    return render(request, "kiosk/dashboard.html", context)
 
 
 @staff_member_required(login_url="login")
@@ -60,63 +71,45 @@ def media_list(request):
         assets = assets.filter(media_type=media_type)
     rows = []
     for asset in assets:
-        rows.append({"asset": asset, "preview_url": preview_url(asset.r2_object_key)})
+        rows.append({"asset": asset, "preview_url": preview_url(asset.file.name)})
     return render(request, "kiosk/media_list.html", {"rows": rows, "query": query, "media_type": media_type})
 
 
 @staff_member_required(login_url="login")
-@require_GET
+@require_http_methods(["GET", "POST"])
 def media_upload(request):
-    return render(request, "kiosk/media_upload.html")
-
-
-@staff_member_required(login_url="login")
-@require_POST
-def upload_presign(request):
-    try:
-        data = json_body(request)
-        validated = validate_upload(data.get("filename"), data.get("mime_type"), data.get("file_size"), data.get("title"))
-        object_key = generate_object_key(validated.extension)
-        url = R2Service().presign_upload(object_key, validated.mime_type)
-        return JsonResponse({
-            "success": True,
-            "upload_url": url,
-            "object_key": object_key,
-            "upload_token": make_upload_token(validated, object_key),
-            "headers": {"Content-Type": validated.mime_type},
-        })
-    except ValidationError as exc:
-        return JsonResponse({"success": False, "error": exc.messages[0]}, status=400)
-    except ImproperlyConfigured:
-        return JsonResponse({"success": False, "error": "Cloudflare R2 nu este configurat."}, status=503)
-    except Exception:
-        return JsonResponse({"success": False, "error": "URL-ul de upload nu a putut fi generat."}, status=502)
-
-
-@staff_member_required(login_url="login")
-@require_POST
-def upload_confirm(request):
-    try:
-        data = json_body(request)
-        payload = read_upload_token(data.get("upload_token", ""))
-        head = R2Service().head(payload["object_key"])
-        if int(head.get("ContentLength", -1)) != int(payload["file_size"]):
-            raise ValidationError("Dimensiunea obiectului încărcat nu corespunde.")
-        if head.get("ContentType") != payload["mime_type"]:
-            raise ValidationError("Tipul obiectului încărcat nu corespunde.")
-        checksum = valid_checksum(data.get("checksum")) or head.get("ChecksumSHA256")
-        asset = MediaAsset.objects.create(
-            title=payload["title"], media_type=payload["media_type"],
-            r2_object_key=payload["object_key"], original_filename=payload["original_filename"],
-            mime_type=payload["mime_type"], file_size=payload["file_size"], checksum=checksum,
+    if request.method == "POST":
+        form = MediaUploadForm(request.POST, request.FILES)
+        if not form.is_valid():
+            return JsonResponse({"success": False, "error": first_form_error(form)}, status=400)
+        uploaded_file = form.cleaned_data["file"]
+        inspection = form.inspection
+        asset = MediaAsset(
+            title=form.cleaned_data["title"],
+            media_type=inspection.media_type,
+            file=uploaded_file,
+            original_filename=inspection.original_filename,
+            mime_type=inspection.mime_type,
+            file_size=inspection.file_size,
+            checksum=inspection.checksum,
         )
-        return JsonResponse({"success": True, "asset_id": asset.pk, "redirect_url": "/media/"})
-    except signing.BadSignature:
-        return JsonResponse({"success": False, "error": "Confirmarea uploadului a expirat sau este invalidă."}, status=400)
-    except ValidationError as exc:
-        return JsonResponse({"success": False, "error": exc.messages[0]}, status=400)
-    except Exception:
-        return JsonResponse({"success": False, "error": "Uploadul nu a putut fi confirmat."}, status=502)
+        try:
+            with transaction.atomic():
+                asset.save()
+        except Exception:
+            if asset.file and asset.file.name and asset.file.storage.exists(asset.file.name):
+                asset.file.storage.delete(asset.file.name)
+            logger.exception("Salvarea unui material media a eșuat.")
+            return JsonResponse(
+                {"success": False, "error": "Fișierul nu a putut fi salvat. Încearcă din nou."}, status=500
+            )
+        return JsonResponse({"success": True, "asset_id": asset.pk, "redirect_url": reverse("media_list")}, status=201)
+    return render(request, "kiosk/media_upload.html", {
+        "form": MediaUploadForm(),
+        "max_image_mb": settings.MAX_IMAGE_UPLOAD_MB,
+        "max_video_mb": settings.MAX_VIDEO_UPLOAD_MB,
+        "max_total_gb": settings.MAX_TOTAL_MEDIA_GB,
+    })
 
 
 @staff_member_required(login_url="login")
@@ -142,15 +135,15 @@ def media_delete(request, pk):
             messages.error(request, "Materialul este folosit. Confirmă eliminarea din toate playlisturile.")
         else:
             try:
-                R2Service().delete(asset.r2_object_key)
+                with transaction.atomic():
+                    if remove_everywhere:
+                        asset.playlist_items.all().delete()
+                        asset.published_items.all().delete()
+                    asset.delete()
             except Exception:
-                messages.error(request, "Fișierul nu a putut fi șters din R2. Înregistrarea a fost păstrată.")
+                logger.exception("Ștergerea materialului media %s a eșuat.", asset.pk)
+                messages.error(request, "Materialul nu a putut fi șters. Fișierul a fost păstrat pe disc.")
                 return redirect("media_delete", pk=asset.pk)
-            with transaction.atomic():
-                if remove_everywhere:
-                    asset.playlist_items.all().delete()
-                    asset.published_items.all().delete()
-                asset.delete()
             messages.success(request, "Materialul a fost șters.")
             return redirect("media_list")
     return render(request, "kiosk/media_delete.html", {"asset": asset, "usage_count": usage_count})
@@ -284,7 +277,7 @@ def playlist_preview(request, pk):
         items = [{
             "type": item.media_type,
             "title": item.title,
-            "url": preview_url(item.r2_object_key),
+            "url": preview_url(item.file_name),
             "duration": item.image_duration_seconds,
         } for item in snapshot.items.filter(is_active=True, media_asset__is_active=True).order_by("position")]
     except Exception:

@@ -1,12 +1,12 @@
 import uuid
 
 from django.http import HttpResponse
+from django.core.files.storage import default_storage
 from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import Device, PublishedPlaylist
-from .services import R2Service
 
 
 def device_from_request(request):
@@ -43,27 +43,25 @@ class PlaylistAPIView(APIView):
             response = HttpResponse(status=304)
             response["ETag"] = etag
             return response
-        try:
-            r2 = R2Service()
-            items = []
-            queryset = snapshot.items.select_related("media_asset").filter(
-                is_active=True, media_asset__is_active=True
-            ).order_by("position")
-            for item in queryset:
-                items.append({
-                    "id": item.id,
-                    "media_id": item.media_asset_id,
-                    "type": item.media_type,
-                    "title": item.title,
-                    "url": r2.presign_download(item.r2_object_key),
-                    "mime_type": item.mime_type,
-                    "file_size": item.file_size,
-                    "checksum": item.checksum,
-                    "duration_seconds": item.image_duration_seconds if item.media_type == "image" else None,
-                    "position": item.position,
-                })
-        except Exception:
-            return Response({"success": False, "error": "Materialele nu pot fi pregătite momentan."}, status=503)
+        items = []
+        queryset = snapshot.items.select_related("media_asset").filter(
+            is_active=True, media_asset__is_active=True
+        ).order_by("position")
+        for item in queryset:
+            if not item.file_name or not default_storage.exists(item.file_name):
+                continue
+            items.append({
+                "id": item.id,
+                "media_id": item.media_asset_id,
+                "type": item.media_type,
+                "title": item.title,
+                "url": request.build_absolute_uri(default_storage.url(item.file_name)),
+                "mime_type": item.mime_type,
+                "file_size": item.file_size,
+                "checksum": item.checksum,
+                "duration_seconds": item.image_duration_seconds if item.media_type == "image" else None,
+                "position": item.position,
+            })
         response = Response({
             "success": True,
             "device": {"id": device.id, "name": device.name},

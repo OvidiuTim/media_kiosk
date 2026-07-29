@@ -1,6 +1,7 @@
 from django import forms
 
 from .models import Device, MediaAsset, Playlist
+from .services import inspect_uploaded_file
 
 
 class BootstrapFormMixin:
@@ -42,3 +43,12 @@ class MediaAssetForm(BootstrapFormMixin, forms.ModelForm):
         super().__init__(*args, **kwargs)
         self.style_fields()
 
+
+class MediaUploadForm(forms.Form):
+    title = forms.CharField(label="Titlu", max_length=200)
+    file = forms.FileField(label="Fișier")
+
+    def clean_file(self):
+        uploaded_file = self.cleaned_data["file"]
+        self.inspection = inspect_uploaded_file(uploaded_file)
+        return uploaded_file

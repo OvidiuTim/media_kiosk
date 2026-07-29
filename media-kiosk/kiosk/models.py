@@ -1,8 +1,18 @@
 import uuid
+from pathlib import Path
 
 from django.core.validators import MinValueValidator
 from django.db import models, transaction
+from django.db.models.signals import post_delete
+from django.dispatch import receiver
 from django.utils import timezone
+
+
+def media_upload_path(instance, filename):
+    extension = Path(filename).suffix.lower()
+    folder = "images" if instance.media_type == MediaAsset.IMAGE else "videos"
+    now = timezone.now()
+    return f"kiosk/{folder}/{now:%Y/%m}/{uuid.uuid4().hex}{extension}"
 
 
 class TimeStampedModel(models.Model):
@@ -44,7 +54,7 @@ class Playlist(TimeStampedModel):
                 is_active=item.is_active,
                 title=item.media_asset.title,
                 media_type=item.media_asset.media_type,
-                r2_object_key=item.media_asset.r2_object_key,
+                file_name=item.media_asset.file.name,
                 mime_type=item.media_asset.mime_type,
                 file_size=item.media_asset.file_size,
                 checksum=item.media_asset.checksum,
@@ -88,7 +98,7 @@ class MediaAsset(TimeStampedModel):
 
     title = models.CharField("titlu", max_length=200)
     media_type = models.CharField("tip", max_length=10, choices=TYPE_CHOICES)
-    r2_object_key = models.CharField("cheie obiect R2", max_length=500, unique=True)
+    file = models.FileField("fișier", upload_to=media_upload_path, max_length=500, blank=True, default="")
     original_filename = models.CharField("nume fișier original", max_length=255)
     mime_type = models.CharField("tip MIME", max_length=100)
     file_size = models.PositiveBigIntegerField("dimensiune")
@@ -137,7 +147,7 @@ class PublishedPlaylistItem(TimeStampedModel):
     is_active = models.BooleanField(default=True)
     title = models.CharField(max_length=200)
     media_type = models.CharField(max_length=10, choices=MediaAsset.TYPE_CHOICES)
-    r2_object_key = models.CharField(max_length=500)
+    file_name = models.CharField(max_length=500, blank=True, default="")
     mime_type = models.CharField(max_length=100)
     file_size = models.PositiveBigIntegerField()
     checksum = models.CharField(max_length=128, blank=True, null=True)
@@ -145,3 +155,17 @@ class PublishedPlaylistItem(TimeStampedModel):
     class Meta:
         ordering = ["position", "id"]
         constraints = [models.UniqueConstraint(fields=["published_playlist", "position"], name="unique_published_position")]
+
+
+@receiver(post_delete, sender=MediaAsset)
+def delete_media_file_after_commit(sender, instance, using, **kwargs):
+    if not instance.file or not instance.file.name:
+        return
+    storage = instance.file.storage
+    file_name = instance.file.name
+
+    def remove_file():
+        if storage.exists(file_name):
+            storage.delete(file_name)
+
+    transaction.on_commit(remove_file, using=using, robust=True)

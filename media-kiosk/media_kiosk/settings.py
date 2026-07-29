@@ -84,19 +84,26 @@ USE_I18N = True
 USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+MEDIA_STORAGE_BACKEND = os.getenv("MEDIA_STORAGE_BACKEND", "local").strip().lower()
+if MEDIA_STORAGE_BACKEND != "local":
+    raise ValueError("MEDIA_STORAGE_BACKEND acceptă momentan numai valoarea 'local'.")
+_media_root = os.getenv("MEDIA_ROOT", "").strip()
+MEDIA_ROOT = Path(_media_root).expanduser() if _media_root else BASE_DIR / "media"
+_media_url = os.getenv("MEDIA_URL", "/media/").strip() or "/media/"
+MEDIA_URL = f"/{_media_url.strip('/')}/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "dashboard"
 LOGOUT_REDIRECT_URL = "login"
 
-R2_ACCOUNT_ID = os.getenv("R2_ACCOUNT_ID", "")
-R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID", "")
-R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY", "")
-R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME", "")
-R2_ENDPOINT_URL = os.getenv("R2_ENDPOINT_URL", "")
-R2_PRESIGNED_URL_EXPIRATION = int(os.getenv("R2_PRESIGNED_URL_EXPIRATION", "86400"))
 MAX_IMAGE_UPLOAD_MB = int(os.getenv("MAX_IMAGE_UPLOAD_MB", "20"))
 MAX_VIDEO_UPLOAD_MB = int(os.getenv("MAX_VIDEO_UPLOAD_MB", "1000"))
+MAX_TOTAL_MEDIA_GB = float(os.getenv("MAX_TOTAL_MEDIA_GB", "20"))
+MIN_FREE_DISK_GB = float(os.getenv("MIN_FREE_DISK_GB", "2"))
+FILE_UPLOAD_MAX_MEMORY_SIZE = int(os.getenv("FILE_UPLOAD_MAX_MEMORY_SIZE", str(2_621_440)))
+FILE_UPLOAD_PERMISSIONS = 0o640
+FILE_UPLOAD_DIRECTORY_PERMISSIONS = 0o750
+DATA_UPLOAD_MAX_NUMBER_FILES = 1
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [],

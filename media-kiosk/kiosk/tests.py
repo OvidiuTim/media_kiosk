@@ -1,26 +1,87 @@
+import hashlib
+import io
 import json
-from unittest.mock import Mock, patch
+import shutil
+import struct
+import tempfile
+import unittest
+import importlib
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
+from PIL import Image
 from django.contrib.auth import get_user_model
-from django.core import signing
+from django.core.files.base import ContentFile
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
-from django.urls import reverse
+from django.urls import clear_url_caches, reverse
 
 from .models import Device, MediaAsset, Playlist, PlaylistItem
-from .services import validate_upload
+from .services import GIBIBYTE
 
 
-def asset(title="Imagine", media_type="image", active=True, suffix="jpg"):
-    mime = "image/jpeg" if media_type == "image" else "video/mp4"
+TEST_MEDIA_DIRECTORY = tempfile.TemporaryDirectory(prefix="media-kiosk-tests-")
+unittest.addModuleCleanup(TEST_MEDIA_DIRECTORY.cleanup)
+
+
+def image_bytes(image_format="PNG"):
+    output = io.BytesIO()
+    Image.new("RGB", (8, 6), color=(255, 90, 61)).save(output, format=image_format)
+    return output.getvalue()
+
+
+def mp4_bytes():
+    payload = b"isom" + struct.pack(">I", 512) + b"isomiso2mp41"
+    ftyp = struct.pack(">I4s", 8 + len(payload), b"ftyp") + payload
+    mdat = struct.pack(">I4s", 8, b"mdat")
+    return ftyp + mdat
+
+
+def upload(name, content, content_type):
+    return SimpleUploadedFile(name, content, content_type=content_type)
+
+
+def asset(title="Imagine", media_type="image", active=True, suffix=None):
+    suffix = suffix or ("png" if media_type == "image" else "mp4")
+    content = image_bytes() if media_type == "image" else mp4_bytes()
+    mime = "image/png" if media_type == "image" else "video/mp4"
     return MediaAsset.objects.create(
-        title=title, media_type=media_type, r2_object_key=f"tests/{title}.{suffix}",
-        original_filename=f"{title}.{suffix}", mime_type=mime, file_size=1024,
+        title=title,
+        media_type=media_type,
+        file=ContentFile(content, name=f"{title}.{suffix}"),
+        original_filename=f"{title}.{suffix}",
+        mime_type=mime,
+        file_size=len(content),
+        checksum=hashlib.sha256(content).hexdigest(),
         is_active=active,
     )
 
 
-class AuthenticationTests(TestCase):
+@override_settings(
+    DEBUG=True,
+    MEDIA_ROOT=TEST_MEDIA_DIRECTORY.name,
+    MEDIA_URL="/media/",
+    MAX_IMAGE_UPLOAD_MB=20,
+    MAX_VIDEO_UPLOAD_MB=1000,
+    MAX_TOTAL_MEDIA_GB=20,
+    MIN_FREE_DISK_GB=0,
+)
+class TemporaryMediaTestCase(TestCase):
     def setUp(self):
+        super().setUp()
+        root = Path(TEST_MEDIA_DIRECTORY.name)
+        if root.exists():
+            for child in root.iterdir():
+                if child.is_dir():
+                    shutil.rmtree(child)
+                else:
+                    child.unlink()
+
+
+class AuthenticationTests(TemporaryMediaTestCase):
+    def setUp(self):
+        super().setUp()
         self.staff = get_user_model().objects.create_user("admin", password="test-pass", is_staff=True)
         self.playlist = Playlist.objects.create(name="Test")
         self.device = Device.objects.create(name="Tabletă")
@@ -44,11 +105,137 @@ class AuthenticationTests(TestCase):
                 self.assertEqual(self.client.get(url).status_code, 200)
 
 
-class PublicationAndAPITests(TestCase):
+class LocalUploadTests(TemporaryMediaTestCase):
     def setUp(self):
+        super().setUp()
+        self.staff = get_user_model().objects.create_user("uploader", password="test-pass", is_staff=True)
+        self.client.force_login(self.staff)
+
+    def post_upload(self, filename, content, content_type, title="Material test"):
+        return self.client.post(reverse("media_upload"), {"title": title, "file": upload(filename, content, content_type)})
+
+    def test_valid_image_upload_checksum_and_uuid_name(self):
+        content = image_bytes()
+        response = self.post_upload("afis-original.png", content, "image/png", "Afiș")
+        self.assertEqual(response.status_code, 201)
+        created = MediaAsset.objects.get(title="Afiș")
+        self.assertEqual(created.checksum, hashlib.sha256(content).hexdigest())
+        self.assertEqual(created.original_filename, "afis-original.png")
+        self.assertRegex(created.file.name, r"^kiosk/images/\d{4}/\d{2}/[0-9a-f]{32}\.png$")
+        self.assertNotIn("afis-original", created.file.name)
+        self.assertTrue(Path(created.file.path).exists())
+
+    def test_valid_mp4_upload(self):
+        content = mp4_bytes()
+        response = self.post_upload("clip.mp4", content, "video/mp4", "Clip")
+        self.assertEqual(response.status_code, 201)
+        created = MediaAsset.objects.get(title="Clip")
+        self.assertEqual(created.media_type, "video")
+        self.assertRegex(created.file.name, r"^kiosk/videos/\d{4}/\d{2}/[0-9a-f]{32}\.mp4$")
+        self.assertEqual(created.checksum, hashlib.sha256(content).hexdigest())
+
+    def test_invalid_extension(self):
+        response = self.post_upload("fisier.exe", b"invalid", "application/octet-stream")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Format neacceptat", response.json()["error"])
+
+    def test_invalid_mime(self):
+        response = self.post_upload("afis.png", image_bytes(), "video/mp4")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("MIME", response.json()["error"])
+
+    def test_corrupt_image(self):
+        response = self.post_upload("afis.png", b"not-a-real-image", "image/png")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("coruptă", response.json()["error"])
+
+    def test_invalid_mp4_without_ftyp(self):
+        response = self.post_upload("clip.mp4", b"not-an-mp4-container", "video/mp4")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("MP4", response.json()["error"])
+
+    @override_settings(MAX_IMAGE_UPLOAD_MB=0)
+    def test_individual_size_limit(self):
+        response = self.post_upload("afis.png", image_bytes(), "image/png")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("limita de 0 MB", response.json()["error"])
+
+    @patch("kiosk.services.media_directory_size", return_value=GIBIBYTE)
+    @override_settings(MAX_TOTAL_MEDIA_GB=1)
+    def test_total_storage_limit(self, _size):
+        response = self.post_upload("afis.png", image_bytes(), "image/png")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("limita totală", response.json()["error"])
+
+    @patch("kiosk.services.shutil.disk_usage", return_value=SimpleNamespace(total=GIBIBYTE, used=0, free=1024))
+    @override_settings(MIN_FREE_DISK_GB=1)
+    def test_insufficient_disk_space(self, _disk):
+        response = self.post_upload("afis.png", image_bytes(), "image/png")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Spațiu insuficient", response.json()["error"])
+
+    @patch("kiosk.views.logger.exception")
+    def test_model_save_failure_removes_orphan_file(self, _logger):
+        def fail_after_file_write(instance, *args, **kwargs):
+            instance.file.save(instance.file.name, instance.file.file, save=False)
+            raise RuntimeError("database failure")
+
+        with patch.object(MediaAsset, "save", fail_after_file_write):
+            response = self.post_upload("afis.png", image_bytes(), "image/png")
+
+        self.assertEqual(response.status_code, 500)
+        self.assertFalse(MediaAsset.objects.exists())
+        self.assertEqual([path for path in Path(TEST_MEDIA_DIRECTORY.name).rglob("*") if path.is_file()], [])
+
+
+class MediaDeletionTests(TemporaryMediaTestCase):
+    def setUp(self):
+        super().setUp()
+        self.staff = get_user_model().objects.create_user("deleter", password="test-pass", is_staff=True)
+        self.client.force_login(self.staff)
+
+    def test_permanent_delete_removes_physical_file(self):
+        media = asset("De șters")
+        file_path = Path(media.file.path)
+        self.assertTrue(file_path.exists())
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(reverse("media_delete", args=[media.pk]))
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(MediaAsset.objects.filter(pk=media.pk).exists())
+        self.assertFalse(file_path.exists())
+
+    def test_used_material_requires_explicit_confirmation(self):
+        media = asset("Folosit")
+        playlist = Playlist.objects.create(name="Protejat")
+        PlaylistItem.objects.create(playlist=playlist, media_asset=media, position=1)
+        playlist.publish()
+        file_path = Path(media.file.path)
+        response = self.client.post(reverse("media_delete", args=[media.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(MediaAsset.objects.filter(pk=media.pk).exists())
+        self.assertTrue(file_path.exists())
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(reverse("media_delete", args=[media.pk]), {"remove_everywhere": "1"})
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(MediaAsset.objects.filter(pk=media.pk).exists())
+        self.assertFalse(file_path.exists())
+
+    @patch("kiosk.views.logger.exception")
+    @patch("kiosk.models.MediaAsset.delete", side_effect=RuntimeError("db failure"))
+    def test_database_failure_keeps_physical_file(self, _delete, _logger):
+        media = asset("Păstrat")
+        file_path = Path(media.file.path)
+        response = self.client.post(reverse("media_delete", args=[media.pk]))
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(file_path.exists())
+
+
+class PublicationAndAPITests(TemporaryMediaTestCase):
+    def setUp(self):
+        super().setUp()
         self.playlist = Playlist.objects.create(name="Recepție")
         self.first = asset("Prima")
-        self.second = asset("Video", media_type="video", suffix="mp4")
+        self.second = asset("Video", media_type="video")
         self.inactive = asset("Oprit", active=False)
         PlaylistItem.objects.create(playlist=self.playlist, media_asset=self.second, position=2)
         PlaylistItem.objects.create(playlist=self.playlist, media_asset=self.first, position=1, image_duration_seconds=8)
@@ -68,23 +255,21 @@ class PublicationAndAPITests(TestCase):
         unassigned = Device.objects.create(name="Fără playlist")
         self.assertEqual(self.client.get(reverse("api_playlist"), **self.headers(unassigned)).status_code, 404)
 
-    @patch("kiosk.api.R2Service")
-    def test_order_inactive_exclusion_and_device_access(self, service_class):
-        service_class.return_value.presign_download.side_effect = lambda key: f"https://r2.test/{key}"
+    def test_absolute_urls_order_and_inactive_exclusion(self):
         self.playlist.publish()
         response = self.client.get(reverse("api_playlist"), **self.headers())
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual([row["title"] for row in data["items"]], ["Prima", "Video"])
         self.assertEqual([row["position"] for row in data["items"]], [1, 2])
+        self.assertTrue(data["items"][0]["url"].startswith("http://testserver/media/kiosk/images/"))
+        self.assertTrue(data["items"][1]["url"].startswith("http://testserver/media/kiosk/videos/"))
         self.assertEqual(data["items"][0]["duration_seconds"], 8)
         self.assertIsNone(data["items"][1]["duration_seconds"])
         self.device.refresh_from_db()
         self.assertIsNotNone(self.device.last_seen_at)
 
-    @patch("kiosk.api.R2Service")
-    def test_draft_changes_are_hidden_until_publish(self, service_class):
-        service_class.return_value.presign_download.side_effect = lambda key: f"https://r2.test/{key}"
+    def test_draft_changes_are_hidden_until_publish(self):
         self.playlist.publish()
         first_item = self.playlist.items.get(media_asset=self.first)
         first_item.image_duration_seconds = 42
@@ -103,9 +288,7 @@ class PublicationAndAPITests(TestCase):
         self.assertIn("Doar draft", [row["title"] for row in response["items"]])
         self.assertEqual(response["items"][0]["duration_seconds"], 42)
 
-    @patch("kiosk.api.R2Service")
-    def test_publication_increments_version_and_etag_returns_304(self, service_class):
-        service_class.return_value.presign_download.return_value = "https://r2.test/file"
+    def test_publication_increments_version_and_etag_returns_304(self):
         self.playlist.publish()
         self.playlist.publish()
         self.assertEqual(self.playlist.published_version, 2)
@@ -122,53 +305,36 @@ class PublicationAndAPITests(TestCase):
         self.assertIsNotNone(self.device.last_seen_at)
 
 
-class UploadValidationTests(TestCase):
+class PreviewAndDevelopmentMediaTests(TemporaryMediaTestCase):
     def setUp(self):
-        self.staff = get_user_model().objects.create_user("admin", password="test-pass", is_staff=True)
+        super().setUp()
+        self.staff = get_user_model().objects.create_user("preview", password="test-pass", is_staff=True)
         self.client.force_login(self.staff)
+        self.media = asset("Preview")
+        self.playlist = Playlist.objects.create(name="Preview local")
+        PlaylistItem.objects.create(playlist=self.playlist, media_asset=self.media, position=1, image_duration_seconds=3)
+        self.playlist.publish()
 
-    @override_settings(MAX_IMAGE_UPLOAD_MB=1, MAX_VIDEO_UPLOAD_MB=2)
-    def test_extension_mime_and_size_are_strictly_validated(self):
-        with self.assertRaisesMessage(Exception, "Format neacceptat"):
-            validate_upload("fisier.exe", "application/octet-stream", 10)
-        with self.assertRaisesMessage(Exception, "MIME"):
-            validate_upload("imagine.jpg", "image/png", 10)
-        with self.assertRaisesMessage(Exception, "limita"):
-            validate_upload("video.mp4", "video/mp4", 3 * 1024 * 1024)
-        valid = validate_upload("imagine.JPG", "image/jpeg", 1024, "Campanie")
-        self.assertEqual(valid.media_type, "image")
-
-    @patch("kiosk.views.R2Service")
-    def test_r2_service_is_mocked_for_presign_and_confirmation(self, service_class):
-        service = service_class.return_value
-        service.presign_upload.return_value = "https://r2.test/upload"
-        service.head.return_value = {"ContentLength": 2048, "ContentType": "image/png"}
-        response = self.client.post(
-            reverse("upload_presign"),
-            data=json.dumps({"filename": "afis.png", "mime_type": "image/png", "file_size": 2048, "title": "Afiș"}),
-            content_type="application/json",
-        )
+    def test_preview_uses_local_media_url(self):
+        response = self.client.get(reverse("playlist_preview", args=[self.playlist.pk]))
         self.assertEqual(response.status_code, 200)
-        data = response.json()
-        self.assertNotIn("R2_SECRET_ACCESS_KEY", json.dumps(data))
-        confirmation = self.client.post(
-            reverse("upload_confirm"), data=json.dumps({"upload_token": data["upload_token"]}),
-            content_type="application/json",
-        )
-        self.assertEqual(confirmation.status_code, 200)
-        created = MediaAsset.objects.get(title="Afiș")
-        self.assertEqual(created.file_size, 2048)
-        self.assertTrue(created.r2_object_key.startswith("media/"))
+        self.assertContains(response, self.media.file.url)
+        self.assertContains(response, "fullscreen-button")
 
-    def test_tampered_confirmation_token_is_rejected(self):
-        response = self.client.post(
-            reverse("upload_confirm"), data=json.dumps({"upload_token": "invalid"}), content_type="application/json"
-        )
-        self.assertEqual(response.status_code, 400)
+    def test_media_is_served_by_django_in_debug(self):
+        import media_kiosk.urls
+
+        clear_url_caches()
+        importlib.reload(media_kiosk.urls)
+        response = self.client.get(self.media.file.url)
+        self.assertEqual(response.status_code, 200)
+        content = b"".join(response.streaming_content)
+        self.assertEqual(content, Path(self.media.file.path).read_bytes())
 
 
-class PlaylistOrderingEndpointTests(TestCase):
+class PlaylistOrderingEndpointTests(TemporaryMediaTestCase):
     def setUp(self):
+        super().setUp()
         self.staff = get_user_model().objects.create_user("editor", password="test-pass", is_staff=True)
         self.client.force_login(self.staff)
         self.playlist = Playlist.objects.create(name="Ordine")

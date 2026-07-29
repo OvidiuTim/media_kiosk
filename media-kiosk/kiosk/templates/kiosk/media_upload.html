@@ -3,19 +3,20 @@
 {% block content %}
 <div class="narrow-page">
   <a class="back-link" href="{% url 'media_list' %}">← Înapoi la materiale</a>
-  <div class="page-heading mt-3"><p class="eyebrow">CLOUDFLARE R2</p><h1>Încarcă un material</h1><p>Fișierul ajunge direct din browser în bucketul privat, fără a fi salvat pe server.</p></div>
+  <div class="page-heading mt-3"><p class="eyebrow">STOCARE LOCALĂ</p><h1>Încarcă un material</h1><p>Fișierul va fi verificat și salvat în spațiul media al serverului.</p></div>
   <div class="content-card mt-4">
-    <form id="upload-form" data-presign-url="{% url 'upload_presign' %}" data-confirm-url="{% url 'upload_confirm' %}">
+    <form id="upload-form" method="post" enctype="multipart/form-data" data-upload-url="{% url 'media_upload' %}">
       {% csrf_token %}
-      <div class="mb-4"><label class="form-label" for="upload-title">Titlu</label><input class="form-control form-control-lg" id="upload-title" maxlength="200" placeholder="Ex. Oferta lunii"></div>
-      <label class="upload-drop" for="upload-file"><span class="upload-icon">↑</span><strong>Alege un fișier</strong><span>sau trage-l aici</span><small>JPG, JPEG, PNG, WEBP până la 20 MB · MP4 până la 1000 MB</small><input id="upload-file" type="file" accept="image/jpeg,image/png,image/webp,video/mp4" required hidden></label>
+      <div class="mb-4"><label class="form-label" for="upload-title">Titlu</label><input class="form-control form-control-lg" id="upload-title" name="title" maxlength="200" placeholder="Ex. Oferta lunii" required></div>
+      <label class="upload-drop" for="upload-file"><span class="upload-icon">↑</span><strong>Alege un fișier</strong><span>sau trage-l aici</span><small>JPG, JPEG, PNG, WEBP până la {{ max_image_mb }} MB · MP4 până la {{ max_video_mb }} MB</small><input id="upload-file" name="file" type="file" accept="image/jpeg,image/png,image/webp,video/mp4" required hidden></label>
       <div id="file-summary" class="file-summary d-none"></div>
-      <div id="upload-progress" class="progress mt-3 d-none" role="progressbar" aria-label="Progres upload"><div class="progress-bar" style="width:0%">0%</div></div>
+      <div id="upload-progress" class="progress mt-3 d-none" role="progressbar" aria-label="Progres upload" aria-valuemin="0" aria-valuemax="100"><div class="progress-bar progress-bar-striped progress-bar-animated" style="width:0%">0%</div></div>
+      <p id="upload-status" class="small text-secondary mt-2 mb-0 d-none" aria-live="polite"></p>
       <div id="upload-error" class="alert alert-danger mt-3 d-none" role="alert"></div>
-      <button class="btn btn-primary btn-lg w-100 mt-4" type="submit">Încarcă în R2</button>
+      <button class="btn btn-primary btn-lg w-100 mt-4" type="submit">Încarcă pe server</button>
     </form>
   </div>
+  <div class="recommendation mt-3"><strong>Limita bibliotecii</strong><span>Spațiul media configurat este de maximum {{ max_total_gb|floatformat:"-2" }} GB.</span></div>
   <div class="recommendation mt-3"><strong>Recomandare video</strong><span>MP4 · H.264 · AAC · maximum 1080p. Transcodarea nu este inclusă în această etapă.</span></div>
 </div>
 {% endblock %}
-

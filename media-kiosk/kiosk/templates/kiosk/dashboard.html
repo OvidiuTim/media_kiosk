@@ -13,6 +13,15 @@
   <a class="stat-card green" href="{% url 'device_list' %}"><span class="stat-icon">▣</span><div><strong>{{ device_count }}</strong><span>Tablete</span></div></a>
 </div>
 
+<section class="storage-card mt-4">
+  <div class="storage-summary">
+    <div><p class="eyebrow">SPAȚIU MEDIA</p><h2>{{ used_display }} ocupați</h2><span>din limita configurată de {{ limit_display }}</span></div>
+    <div class="storage-free"><strong>{{ free_display }}</strong><span>liberi pe disc</span></div>
+  </div>
+  <div class="storage-progress" role="progressbar" aria-label="Spațiu media utilizat" aria-valuenow="{{ used_percent }}" aria-valuemin="0" aria-valuemax="100"><span style="width: {{ used_percent }}%"></span></div>
+  <div class="storage-foot"><span>{{ used_percent }}% din limita media utilizată</span><a href="{% url 'media_upload' %}">Adaugă conținut →</a></div>
+</section>
+
 <div class="row g-4 mt-1">
   <div class="col-xl-8">
     <section class="content-card h-100">
@@ -39,4 +48,3 @@
   </div>
 </div>
 {% endblock %}
-
