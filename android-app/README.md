@@ -57,7 +57,7 @@ Cache-ul privat este în `filesDir/media_cache/`. Descărcările sunt scrise în
 
 ## Administrare ascunsă
 
-Apasă rapid de cinci ori colțul stânga-sus al playerului și introdu PIN-ul. Ecranul administrativ arată dispozitivul, serverul, numai ultimele patru caractere ale cheii, playlistul și versiunea, sincronizarea, heartbeatul, internetul, cache-ul, Lock Task și ultima eroare. De aici se poate sincroniza, curăța cache-ul neutilizat, modifica setările, activa Lock Task autorizat sau ieși temporar din kiosk.
+Apasă rapid de cinci ori colțul stânga-sus al playerului și introdu PIN-ul. Ecranul administrativ arată dispozitivul, serverul, numai ultimele patru caractere ale cheii, playlistul și versiunea, sincronizarea, heartbeatul, internetul, cache-ul, starea ultimei porniri, Home și Lock Task. De aici se poate sincroniza, curăța cache-ul, modifica setările, controla pornirea automată, deschide selectorul Home, activa explicit un Lock Task deja autorizat sau ieși temporar din kiosk.
 
 ## Instalare și actualizare prin ADB
 
@@ -82,16 +82,75 @@ Operația funcționează de regulă numai înainte de adăugarea conturilor și 
 
 ## Pornire după boot și opțiune Home/Launcher
 
-`BootReceiver` ascultă `BOOT_COMPLETED` și încearcă să deschidă playerul dacă aplicația este configurată. Android 10+ și unele firmware-uri de producător pot restricționa pornirea activităților din background; pentru dispozitive dedicate, soluția robustă este device owner sau folosirea aplicației ca Home.
+Comutatorul **Pornire automată după restart** este activ implicit în ecranul administrativ. Receiverul pornește exclusiv `KioskActivity`, numai dacă aplicația este deja configurată și comutatorul este activ. Nu deschide configurarea după boot. Playerul citește mai întâi playlistul și cache-ul privat, deci pornește offline când există o versiune locală validă.
 
-Aliasul Home este inclus, dar dezactivat implicit. Se activează numai la cererea administratorului:
+Manifestul declară `RECEIVE_BOOT_COMPLETED`, iar receiverul exportat ascultă `BOOT_COMPLETED`, `LOCKED_BOOT_COMPLETED` și `USER_UNLOCKED`. Pe Android 7+ receiverul este Direct Boot aware, dar cheia, PIN-ul, playlistul și media rămân intenționat în credential-protected storage. La `LOCKED_BOOT_COMPLETED` se salvează numai un indicator nesensibil în device-protected storage; playerul este pornit după deblocare, când cache-ul poate fi citit. Broadcasturile apropiate sunt deduplicate.
+
+Comportamentul depinde de versiunea Android:
+
+- Android 5.1–9: receiverul poate porni direct activitatea după `BOOT_COMPLETED`;
+- Android 10–14: pornirea activităților din background poate fi blocată. Pentru o tabletă dedicată, metoda robustă este Media Kiosk ca aplicație Home; Android pornește automat Home după boot;
+- un device owner configurat separat poate porni direct, dar aplicația nu activează automat Device Owner și nu activează automat Lock Task;
+- pe Android 13+ categoria de baterie **Restricted/Restricționată** poate amâna inclusiv broadcasturile de boot până când aplicația este pornită manual.
+
+Documentație Android: [restricțiile de background activity launch](https://developer.android.com/guide/components/activities/background-starts), [Direct Boot](https://developer.android.com/privacy-and-security/direct-boot) și [custom Home pentru dispozitive dedicate](https://developer.android.com/work/dpc/dedicated-devices/cookbook#be-home-app).
+
+### Selectarea Media Kiosk ca Home
+
+1. Intră în administrare prin cinci apăsări și PIN.
+2. Apasă **Setează Media Kiosk ca aplicație principală**.
+3. Confirmă **Deschide selectorul**.
+4. În selectorul Android alege **Media Kiosk**, apoi **Întotdeauna**.
+
+Pe Android 10+ se folosește cererea oficială pentru rolul `ROLE_HOME`; pe versiunile mai vechi se deschide pagina sistemului pentru aplicația Home. Aliasul cu `MAIN + HOME + DEFAULT` este dezactivat implicit și devine candidat numai după acțiunea explicită a administratorului.
+
+Pentru revenire:
+
+1. Intră în administrare cu PIN-ul.
+2. Apasă **Revino la launcherul sistemului**.
+3. Confirmă din nou PIN-ul. După trei încercări greșite se aplică blocarea de 30 de secunde.
+4. În setările Home deschise de aplicație alege launcherul sistemului și **Întotdeauna**.
+
+Aliasul Media Kiosk este dezactivat numai după PIN corect. Nu există o acțiune neprotejată în player care să schimbe aplicația Home.
+
+### Android 5.1 — pași recomandați
+
+1. Instalează APK-ul, pornește-l o dată și finalizează configurarea.
+2. În administrare lasă activ **Pornire automată după restart**.
+3. Pentru comportament kiosk robust, apasă **Setează Media Kiosk ca aplicație principală**; pe AOSP 5.1 selectorul poate apărea ca **Settings → Home** sau **Settings → Apps → Default apps → Home**.
+4. Alege **Media Kiosk → Întotdeauna** și repornește tableta.
+5. Dacă nu folosești Home, receiverul pornește direct playerul după boot, dar firmware-ul producătorului poate cere permisiune separată de autostart.
+
+### Android 14 — pași recomandați
+
+1. Finalizează configurarea și activează comutatorul de autostart.
+2. Apasă butonul Home din administrare și acceptă rolul **Home app** pentru Media Kiosk.
+3. Verifică **Settings → Apps → Default apps → Home app → Media Kiosk**.
+4. Deschide **Settings → Apps → Media Kiosk → App battery usage** și selectează **Unrestricted** sau activează **Allow background usage**, dacă opțiunea există.
+5. Nu seta aplicația în categoria **Restricted**; aceasta poate împiedica livrarea `BOOT_COMPLETED` pentru aplicațiile care țintesc API 33+.
+6. Repornește tableta și verifică redarea cu Wi-Fi oprit pentru fallbackul offline.
+
+### Setări speciale ale producătorilor
+
+Denumirile pot varia între versiuni, dar verifică explicit ambele permisiuni: autostart și baterie fără restricții.
+
+- Samsung One UI: **Settings → Apps → Media Kiosk → Battery → Unrestricted**; apoi **Battery and device care → Battery → Background usage limits → Never auto sleeping apps** și adaugă Media Kiosk.
+- Xiaomi MIUI/HyperOS: **Settings → Apps → Permissions → Background autostart → Media Kiosk**; apoi **Battery → Media Kiosk → No restrictions**.
+- Huawei EMUI: **Settings → Battery → App launch → Media Kiosk → Manage manually** și activează **Auto-launch**, **Secondary launch**, **Run in background**.
+- OPPO/Realme: **Settings → Apps → Auto launch → Media Kiosk**; apoi **Battery usage → Allow background activity/No restrictions**.
+- OnePlus/OxygenOS: **Settings → Apps → Auto-launch → Media Kiosk**; apoi **Battery → Battery optimization → Don’t optimize**.
+- Lenovo/Motorola: **Settings → Apps → Special app access → Battery optimization → All apps → Media Kiosk → Don’t optimize**; verifică și opțiunea vendor **Auto-start** dacă există.
+
+Pe firmware-uri kiosk administrate, Home implicit este preferabil excepțiilor OEM de baterie. Aceste setări nu activează Device Owner sau Lock Task.
+
+Administrare alternativă prin ADB a aliasului Home:
 
 ```bash
 adb shell pm enable ro.dmxconstruction.mediakiosk/.KioskHomeAlias
 adb shell am start -a android.intent.action.MAIN -c android.intent.category.HOME
 ```
 
-Android va permite alegerea aplicației Home. Revenirea la starea inițială:
+Revenirea la starea inițială:
 
 ```bash
 adb shell pm disable ro.dmxconstruction.mediakiosk/.KioskHomeAlias
@@ -120,7 +179,7 @@ Nu se folosește `tools:overrideLibrary`, Room, Compose, WorkManager sau un Trus
 
 ## Teste
 
-Testele JVM nu contactează producția. MockWebServer verifică endpointurile, headerele, JSON-ul, ETag/304 și downloadurile. Sunt acoperite validarea/ordonarea, persistența și schimbarea atomică, checksum, `.part`, Range, hit/miss, limită/LRU, fallback offline, backoff, UUID/URL, hash/salt PIN și blocarea după PIN greșit.
+Testele JVM nu contactează producția. MockWebServer verifică endpointurile, headerele, JSON-ul, ETag/304 și downloadurile. Sunt acoperite validarea/ordonarea, persistența și schimbarea atomică, checksum, `.part`, Range, hit/miss, limită/LRU, fallback offline, backoff, UUID/URL, hash/salt PIN, blocarea după PIN greșit, boot configurat/neconfigurat, autostart activ/inactiv, Direct Boot, pornire offline, politica Android modern, selectorul Home și ieșirea protejată.
 
 Testele instrumentate se compilează cu:
 
@@ -138,8 +197,8 @@ Ele verifică ecranul de configurare, navigarea către kiosk fără a folosi pro
 
 Verificare locală din 30 iulie 2026:
 
-- 28 teste JVM: trecute;
-- 10 teste instrumentate pe emulator Android API 37: trecute;
+- 37 teste JVM: trecute;
+- 11 teste instrumentate pe emulator Android API 37: trecute;
 - `lintDebug`: trecut, fără erori;
 - `assembleDebug`: trecut, APK debug generat;
 - manifest/APK: `minSdk 22`, `targetSdk 34`, `compileSdk 34`.

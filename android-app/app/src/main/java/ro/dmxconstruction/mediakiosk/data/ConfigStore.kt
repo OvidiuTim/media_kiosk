@@ -11,6 +11,10 @@ class ConfigStore(context: Context) {
 
     fun isConfigured(): Boolean = prefs.getBoolean(KEY_CONFIGURED, false)
 
+    var autostartEnabled: Boolean
+        get() = prefs.getBoolean(KEY_AUTOSTART, true)
+        set(value) { prefs.edit().putBoolean(KEY_AUTOSTART, value).apply() }
+
     fun load(): AppConfig? {
         if (!isConfigured()) return null
         val server = prefs.getString(KEY_SERVER, null) ?: return null
@@ -66,6 +70,7 @@ class ConfigStore(context: Context) {
         const val DEFAULT_SERVER = "https://kiosk.dmxconstruction.ro"
         const val DEFAULT_CACHE = 1024L * 1024 * 1024
         private const val KEY_CONFIGURED = "configured"
+        private const val KEY_AUTOSTART = "autostart_enabled"
         private const val KEY_SERVER = "server"
         private const val KEY_DEVICE_KEY = "device_key"
         private const val KEY_CACHE_LIMIT = "cache_limit"
@@ -102,4 +107,7 @@ class RuntimeStateStore(context: Context) {
     var lastError: String?
         get() = prefs.getString("last_error", null)
         set(value) { prefs.edit().putString("last_error", value?.take(300)).apply() }
+    var lastBootStatus: String?
+        get() = prefs.getString("last_boot_status", null)
+        set(value) { prefs.edit().putString("last_boot_status", value?.take(300)).apply() }
 }

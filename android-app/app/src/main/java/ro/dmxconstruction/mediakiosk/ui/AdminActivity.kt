@@ -1,9 +1,13 @@
 package ro.dmxconstruction.mediakiosk.ui
 
+import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.net.ConnectivityManager
 import android.os.Bundle
+import android.provider.Settings
+import android.text.InputType
+import android.widget.EditText
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
@@ -11,12 +15,14 @@ import ro.dmxconstruction.mediakiosk.BuildConfig
 import ro.dmxconstruction.mediakiosk.cache.MediaCache
 import ro.dmxconstruction.mediakiosk.data.ApiFactory
 import ro.dmxconstruction.mediakiosk.data.ConfigStore
+import ro.dmxconstruction.mediakiosk.data.PinResult
 import ro.dmxconstruction.mediakiosk.data.PlaylistRepository
 import ro.dmxconstruction.mediakiosk.data.PlaylistStore
 import ro.dmxconstruction.mediakiosk.data.RuntimeStateStore
 import ro.dmxconstruction.mediakiosk.data.SyncResult
 import ro.dmxconstruction.mediakiosk.databinding.ActivityAdminBinding
 import ro.dmxconstruction.mediakiosk.kiosk.KioskMode
+import ro.dmxconstruction.mediakiosk.kiosk.HomeLauncherController
 import java.io.File
 import java.text.DateFormat
 import java.util.Date
@@ -31,6 +37,11 @@ class AdminActivity : AppCompatActivity() {
         binding = ActivityAdminBinding.inflate(layoutInflater)
         setContentView(binding.root)
         configStore = ConfigStore(this)
+        binding.autostartSwitch.isChecked = configStore.autostartEnabled
+        binding.autostartSwitch.setOnCheckedChangeListener { _, enabled ->
+            configStore.autostartEnabled = enabled
+            refresh(if (enabled) "Pornirea automată este activă." else "Pornirea automată este dezactivată.")
+        }
         refresh()
         binding.syncButton.setOnClickListener { syncNow() }
         binding.cleanButton.setOnClickListener { cleanUnused() }
@@ -51,6 +62,8 @@ class AdminActivity : AppCompatActivity() {
             )
             finish()
         }
+        binding.setHomeButton.setOnClickListener { showHomeSelectionExplanation() }
+        binding.systemLauncherButton.setOnClickListener { showSystemLauncherPinDialog() }
         binding.backButton.setOnClickListener { finish() }
     }
 
@@ -75,12 +88,63 @@ class AdminActivity : AppCompatActivity() {
             append("Ultima sincronizare: ${formatTime(state.lastSync)}\n")
             append("Ultimul heartbeat: ${formatTime(state.lastHeartbeat)}\n")
             append("Internet: ${if (isOnline()) "conectat" else "offline"}\n")
+            append("Pornire automată: ${if (configStore.autostartEnabled) "activă" else "dezactivată"}\n")
+            append("Aplicație principală: ${if (HomeLauncherController.isDefaultHome(this@AdminActivity)) "Media Kiosk" else "launcherul sistemului"}\n")
             append("Lock Task: ${if (KioskMode.isLockTaskActive(this@AdminActivity)) "activ" else if (KioskMode.isLockTaskPermitted(this@AdminActivity)) "autorizat, inactiv" else "neautorizat"}\n")
             append("Cache utilizat: ${formatBytes(mediaCache?.usedBytes() ?: 0)}\n")
             append("Limită cache: ${formatBytes(config.cacheLimitBytes)}\n")
             append("Materiale locale: ${mediaCache?.localCount() ?: 0}\n")
+            append("Ultima pornire: ${state.lastBootStatus ?: "Nicio informație"}\n")
             append("Ultima eroare: ${state.lastError ?: "Nicio eroare"}")
         }
+    }
+
+    private fun showHomeSelectionExplanation() {
+        AlertDialog.Builder(this)
+            .setTitle("Media Kiosk ca aplicație principală")
+            .setMessage("În selectorul Android alege Media Kiosk, apoi opțiunea Întotdeauna. Aplicația va fi deschisă automat după pornirea tabletei.")
+            .setNegativeButton("Anulează", null)
+            .setPositiveButton("Deschide selectorul") { _, _ ->
+                HomeLauncherController.enableHomeCandidate(this)
+                openSettings(HomeLauncherController.createHomeSelectionIntent(this))
+            }
+            .show()
+    }
+
+    private fun showSystemLauncherPinDialog() {
+        val input = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+            hint = "PIN administrare"
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Revino la launcherul sistemului")
+            .setMessage("Confirmă PIN-ul administrativ pentru a dezactiva Media Kiosk ca aplicație Home.")
+            .setView(input)
+            .setNegativeButton("Anulează", null)
+            .setPositiveButton("Continuă", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                when (val result = HomeLauncherController.disableAfterPin(this, input.text.toString())) {
+                    PinResult.Valid -> {
+                        KioskMode.exit(this)
+                        dialog.dismiss()
+                        openSettings(HomeLauncherController.createSystemHomeSettingsIntent())
+                    }
+                    PinResult.Invalid -> dialog.setMessage("PIN incorect. Media Kiosk rămâne aplicația principală.")
+                    is PinResult.Locked -> dialog.setMessage(
+                        "Prea multe încercări. Reîncearcă în ${result.remainingMs / 1000 + 1} secunde."
+                    )
+                }
+                input.text.clear()
+            }
+        }
+        dialog.show()
+    }
+
+    private fun openSettings(intent: Intent) {
+        runCatching { startActivity(intent) }
+            .onFailure { startActivity(Intent(Settings.ACTION_SETTINGS)) }
     }
 
     private fun syncNow() {

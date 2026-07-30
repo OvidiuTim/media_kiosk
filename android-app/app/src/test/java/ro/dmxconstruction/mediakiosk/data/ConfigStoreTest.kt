@@ -30,6 +30,13 @@ class ConfigStoreTest {
         assertEquals(PinResult.Valid, store.verifyPin("1234"))
     }
 
+    @Test fun `pornirea automata este activa implicit si poate fi dezactivata`() {
+        val store = ConfigStore(context)
+        assertTrue(store.autostartEnabled)
+        store.autostartEnabled = false
+        assertFalse(ConfigStore(context).autostartEnabled)
+    }
+
     @Test fun `salvari separate folosesc salturi diferite`() {
         ConfigStore(context).save(config(), "1234")
         val prefs = context.getSharedPreferences("private_kiosk_config", Context.MODE_PRIVATE)
