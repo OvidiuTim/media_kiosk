@@ -153,13 +153,13 @@ def recover_stale_jobs(now=None):
     stale_outputs = list(
         MediaAsset.objects.filter(
             processing_status=MediaAsset.PROCESSING,
-            processing_started_at__lt=cutoff,
+            updated_at__lt=cutoff,
         ).exclude(processing_output="").values_list("processing_output", flat=True)
     )
     with transaction.atomic():
         recovered = MediaAsset.objects.filter(
             processing_status=MediaAsset.PROCESSING,
-            processing_started_at__lt=cutoff,
+            updated_at__lt=cutoff,
         ).update(
             processing_status=MediaAsset.QUEUED,
             processing_progress=0,
@@ -210,6 +210,7 @@ def claim_next_job(worker_token=None, worker_pid=None):
             processing_attempts=F("processing_attempts") + 1,
             worker_token=token,
             worker_pid=worker_pid or os.getpid(),
+            updated_at=now,
         )
         if not updated:
             return None
@@ -301,11 +302,15 @@ def _progress_seconds(values):
 
 
 def _update_progress(asset_id, token, percent):
-    return MediaAsset.objects.filter(
+    now = timezone.now()
+    updated = MediaAsset.objects.filter(
         pk=asset_id,
         processing_status=MediaAsset.PROCESSING,
         worker_token=token,
-    ).update(processing_progress=max(0, min(99, int(percent))))
+    ).update(processing_progress=max(0, min(99, int(percent))), updated_at=now)
+    if updated:
+        MediaProcessingLock.objects.filter(worker_token=token).update(acquired_at=now)
+    return updated
 
 
 def _validate_output(metadata):
@@ -458,6 +463,20 @@ def process_claimed_job(asset_id, token, *, popen_factory=subprocess.Popen, prob
         return True
     except MediaAsset.DoesNotExist:
         return False
+    except ProcessingStopped as exc:
+        now = timezone.now()
+        MediaAsset.objects.filter(pk=asset_id, worker_token=token).update(
+            processing_status=MediaAsset.QUEUED,
+            processing_progress=0,
+            processing_error=sanitized_error(exc),
+            queued_at=now,
+            processing_started_at=None,
+            worker_token=None,
+            worker_pid=None,
+            processing_output="",
+            updated_at=now,
+        )
+        return False
     except Exception as exc:
         message = sanitized_error(exc)
         MediaAsset.objects.filter(pk=asset_id, worker_token=token).update(
@@ -467,6 +486,7 @@ def process_claimed_job(asset_id, token, *, popen_factory=subprocess.Popen, prob
             worker_token=None,
             worker_pid=None,
             processing_output="",
+            updated_at=timezone.now(),
         )
         return False
     finally:

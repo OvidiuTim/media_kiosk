@@ -12,7 +12,7 @@ from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.urls import reverse
-from django.views.decorators.http import require_http_methods, require_POST
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from .forms import DeviceForm, MediaAssetForm, MediaUploadForm, PlaylistForm
 from .models import Device, MediaAsset, Playlist, PlaylistItem
@@ -191,6 +191,7 @@ def media_status_payload(asset):
 
 
 @staff_member_required(login_url="login")
+@require_GET
 def media_processing_status(request):
     raw_ids = request.GET.get("ids", "")
     try:

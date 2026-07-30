@@ -3,7 +3,6 @@ import io
 import json
 import shutil
 import struct
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -11,7 +10,7 @@ import importlib
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 from PIL import Image
 from django.contrib.auth import get_user_model
@@ -387,6 +386,19 @@ class VideoProcessingTests(TemporaryMediaTestCase):
         self.assertTrue(source_path.exists())
         self.assertFalse(list(Path(TEST_MEDIA_DIRECTORY.name).rglob("*.part.mp4")))
 
+    @patch("kiosk.video_processing.probe_video", return_value=SOURCE_METADATA)
+    def test_safe_stop_requeues_job(self, _probe):
+        media = queued_video()
+        source_path = Path(media.source_file.path)
+        asset_id, token = claim_next_job()
+        self.assertFalse(process_claimed_job(
+            asset_id, token, popen_factory=SuccessfulFFmpegProcess, should_stop=lambda: True
+        ))
+        media.refresh_from_db()
+        self.assertEqual(media.processing_status, MediaAsset.QUEUED)
+        self.assertTrue(source_path.exists())
+        self.assertFalse(list(Path(TEST_MEDIA_DIRECTORY.name).rglob("*.part.mp4")))
+
     @patch("kiosk.video_processing.probe_video", side_effect=ProcessingError("Sursă invalidă"))
     def test_invalid_source_is_failed_and_preserved(self, _probe):
         media = queued_video()
@@ -456,6 +468,7 @@ class VideoProcessingTests(TemporaryMediaTestCase):
         media.worker_token = token
         media.processing_output = "kiosk/videos/stale.part.mp4"
         media.save()
+        MediaAsset.objects.filter(pk=media.pk).update(updated_at=stale)
         part = Path(TEST_MEDIA_DIRECTORY.name) / media.processing_output
         part.parent.mkdir(parents=True, exist_ok=True)
         part.write_bytes(b"partial")
@@ -516,6 +529,21 @@ class VideoProcessingTests(TemporaryMediaTestCase):
         self.assertEqual(response.status_code, 302)
         playlist.refresh_from_db()
         self.assertEqual(playlist.published_version, 0)
+
+    def test_published_file_stays_available_during_reprocessing(self):
+        media = asset("Video încă disponibil", media_type="video")
+        playlist = Playlist.objects.create(name="Playlist stabil")
+        PlaylistItem.objects.create(playlist=playlist, media_asset=media, position=1)
+        playlist.publish()
+        device = Device.objects.create(name="Tabletă stabilă", assigned_playlist=playlist)
+        media.source_file.save("reprocess.mp4", ContentFile(mp4_bytes()), save=False)
+        media.processing_status = MediaAsset.QUEUED
+        media.processing_progress = 0
+        media.queued_at = timezone.now()
+        media.save()
+        response = self.client.get(reverse("api_playlist"), HTTP_X_DEVICE_KEY=str(device.device_key))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item["title"] for item in response.json()["items"]], [media.title])
 
     @patch("kiosk.video_processing.probe_video", side_effect=[SOURCE_METADATA, FINAL_METADATA])
     def test_atomic_replacement_updates_etag_and_published_snapshot(self, _probe):
