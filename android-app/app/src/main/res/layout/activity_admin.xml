@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent" android:background="@color/surface">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:padding="28dp">
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="Administrare Media Kiosk" android:textColor="@color/white" android:textSize="26sp"
+            android:textStyle="bold" android:layout_marginBottom="20dp" />
+        <TextView android:id="@+id/infoText" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:textColor="@color/white" android:textSize="16sp" android:lineSpacingExtra="6dp"
+            android:background="@drawable/field_background" android:padding="16dp" android:layout_marginBottom="18dp" />
+        <Button android:id="@+id/syncButton" android:layout_width="match_parent" android:layout_height="56dp"
+            android:text="Sincronizează acum" android:textAllCaps="false" android:background="@drawable/button_background" android:layout_marginBottom="10dp" />
+        <Button android:id="@+id/cleanButton" android:layout_width="match_parent" android:layout_height="56dp"
+            android:text="Curăță fișierele neutilizate" android:textAllCaps="false" android:background="@drawable/button_background" android:layout_marginBottom="10dp" />
+        <Button android:id="@+id/settingsButton" android:layout_width="match_parent" android:layout_height="56dp"
+            android:text="Modifică setările" android:textAllCaps="false" android:background="@drawable/button_background" android:layout_marginBottom="10dp" />
+        <Button android:id="@+id/lockTaskButton" android:layout_width="match_parent" android:layout_height="56dp"
+            android:text="Activează Lock Task Mode" android:textAllCaps="false" android:background="@drawable/button_background" android:layout_marginBottom="10dp" />
+        <Button android:id="@+id/exitKioskButton" android:layout_width="match_parent" android:layout_height="56dp"
+            android:text="Ieși temporar din modul kiosk" android:textAllCaps="false" android:background="@drawable/button_background" android:layout_marginBottom="10dp" />
+        <Button android:id="@+id/backButton" android:layout_width="match_parent" android:layout_height="56dp"
+            android:text="Înapoi la conținut" android:textAllCaps="false" android:background="@drawable/button_background" />
+    </LinearLayout>
+</ScrollView>

@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Media Kiosk</string>
+    <string name="device_admin_description">Permite administrarea opțională a unei tablete dedicate.</string>
+</resources>
