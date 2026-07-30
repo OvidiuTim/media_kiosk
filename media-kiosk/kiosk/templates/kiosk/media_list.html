@@ -8,7 +8,7 @@
   <button class="btn btn-dark" type="submit">Filtrează</button>
   {% if query or media_type %}<a class="btn btn-link" href="{% url 'media_list' %}">Resetează</a>{% endif %}
 </form>
-<div class="media-grid mt-4">
+<div class="media-grid mt-4" id="media-grid" data-status-url="{% url 'media_processing_status' %}">
   {% for row in rows %}
   <article class="media-card">
     <div class="media-thumb">
@@ -16,10 +16,18 @@
       <span class="type-badge">{{ row.asset.get_media_type_display }}</span>
     </div>
     <div class="media-body"><div class="d-flex justify-content-between gap-2"><div><h2>{{ row.asset.title }}</h2><p>{{ row.asset.file_size|filesizeformat }} · {{ row.asset.created_at|date:"d M Y" }}</p></div><span class="status-dot {% if row.asset.is_active %}on{% endif %}" title="{% if row.asset.is_active %}Activ{% else %}Inactiv{% endif %}"></span></div>
-      <div class="media-actions">{% if row.preview_url %}<a href="{{ row.preview_url }}" target="_blank" rel="noopener">Preview</a>{% endif %}<a href="{% url 'media_edit' row.asset.pk %}">Editează</a><a class="text-danger" href="{% url 'media_delete' row.asset.pk %}">Șterge</a></div>
+      {% if row.asset.media_type == 'video' %}
+      <div class="video-processing js-video-processing mt-3" data-media-id="{{ row.asset.pk }}" data-status="{{ row.asset.processing_status }}">
+        <strong class="js-processing-label">{% if row.asset.processing_status == 'processing' %}Se optimizează – {{ row.asset.processing_progress }}%{% else %}{{ row.asset.get_processing_status_display }}{% endif %}</strong>
+        <div class="processing-progress js-processing-progress {% if row.asset.processing_status != 'processing' %}d-none{% endif %}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ row.asset.processing_progress }}"><span class="js-processing-bar" style="width:{{ row.asset.processing_progress }}%"></span></div>
+        <small class="js-processing-details">{% if row.asset.processing_status == 'ready' %}{{ row.asset.original_file_size|filesizeformat }} → {{ row.asset.final_file_size|filesizeformat }}{% if row.asset.video_height %}<br>{{ row.asset.video_height }}p · {{ row.asset.video_codec }}{% endif %}{% endif %}</small>
+        <p class="processing-error js-processing-error {% if row.asset.processing_status != 'failed' %}d-none{% endif %}">{{ row.asset.processing_error }}</p>
+        <button class="btn btn-sm btn-outline-danger js-processing-retry {% if row.asset.processing_status != 'failed' or not row.asset.source_file %}d-none{% endif %}" type="button" data-retry-url="{% url 'media_retry' row.asset.pk %}">Reîncearcă</button>
+      </div>
+      {% endif %}
+      <div class="media-actions">{% if row.preview_url %}<a href="{{ row.preview_url }}" target="_blank" rel="noopener">Preview</a>{% endif %}<a href="{% url 'media_edit' row.asset.pk %}">Editează</a>{% if row.asset.media_type == 'video' and row.asset.processing_status == 'ready' and row.preview_url %}<form method="post" action="{% url 'media_optimize' row.asset.pk %}" onsubmit="return confirm('Optimizezi acest videoclip? Fișierul actual rămâne disponibil până la finalizarea cu succes.');">{% csrf_token %}<button type="submit">Optimizează videoclipul</button></form>{% endif %}<a class="text-danger" href="{% url 'media_delete' row.asset.pk %}">Șterge</a></div>
     </div>
   </article>
   {% empty %}<div class="content-card empty-state wide"><h2>Niciun material găsit</h2><p>Încarcă primul fișier sau schimbă filtrele.</p><a class="btn btn-primary" href="{% url 'media_upload' %}">Încarcă material</a></div>{% endfor %}
 </div>
 {% endblock %}
-

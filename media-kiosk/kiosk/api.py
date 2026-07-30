@@ -48,6 +48,10 @@ class PlaylistAPIView(APIView):
             is_active=True, media_asset__is_active=True
         ).order_by("position")
         for item in queryset:
+            if item.media_type == "video" and (
+                not item.media_asset.file or item.file_name != item.media_asset.file.name
+            ):
+                continue
             if not item.file_name or not default_storage.exists(item.file_name):
                 continue
             items.append({

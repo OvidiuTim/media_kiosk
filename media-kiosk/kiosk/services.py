@@ -52,6 +52,30 @@ def media_directory_size(root=None):
     return total
 
 
+def media_size_breakdown(root=None):
+    root = Path(root or settings.MEDIA_ROOT)
+    values = {"sources": 0, "processing": 0, "final": 0, "total": 0}
+    if not root.exists():
+        return values
+    for directory, _, filenames in os.walk(root, followlinks=False):
+        for filename in filenames:
+            path = Path(directory) / filename
+            try:
+                size = path.stat().st_size
+                relative = path.relative_to(root)
+            except (OSError, ValueError):
+                continue
+            if "sources" in relative.parts:
+                category = "sources"
+            elif filename.endswith(".part.mp4"):
+                category = "processing"
+            else:
+                category = "final"
+            values[category] += size
+            values["total"] += size
+    return values
+
+
 def format_bytes(value):
     value = max(0, int(value))
     if value >= GIBIBYTE:
@@ -65,7 +89,8 @@ def format_bytes(value):
 
 def storage_stats():
     root = ensure_media_root()
-    used = media_directory_size(root)
+    breakdown = media_size_breakdown(root)
+    used = breakdown["total"]
     disk = shutil.disk_usage(root)
     limit = int(settings.MAX_TOTAL_MEDIA_GB * GIBIBYTE)
     percent = (used / limit * 100) if limit > 0 else 0
@@ -77,16 +102,19 @@ def storage_stats():
         "limit_bytes": limit,
         "limit_display": format_bytes(limit),
         "used_percent": min(100, round(percent, 1)),
+        "source_display": format_bytes(breakdown["sources"]),
+        "processing_display": format_bytes(breakdown["processing"]),
+        "final_display": format_bytes(breakdown["final"]),
     }
 
 
-def validate_capacity(file_size):
+def validate_capacity(file_size, *, action="Upload"):
     root = ensure_media_root()
     used = media_directory_size(root)
     total_limit = int(settings.MAX_TOTAL_MEDIA_GB * GIBIBYTE)
     if total_limit > 0 and used + file_size > total_limit:
         raise ValidationError(
-            f"Upload refuzat: limita totală de {settings.MAX_TOTAL_MEDIA_GB:g} GB ar fi depășită."
+            f"{action} refuzat: limita totală de {settings.MAX_TOTAL_MEDIA_GB:g} GB ar fi depășită."
         )
     free = shutil.disk_usage(root).free
     reserve = int(settings.MIN_FREE_DISK_GB * GIBIBYTE)
@@ -94,6 +122,47 @@ def validate_capacity(file_size):
         raise ValidationError(
             f"Spațiu insuficient pe disc. Trebuie păstrată o rezervă de cel puțin {settings.MIN_FREE_DISK_GB:g} GB."
         )
+
+
+def estimated_transcode_size(duration_seconds, source_size):
+    if duration_seconds and duration_seconds > 0:
+        max_video_bps = _bitrate_to_bits(settings.VIDEO_MAX_BITRATE)
+        audio_bps = _bitrate_to_bits(settings.VIDEO_AUDIO_BITRATE)
+        estimate = int((max_video_bps + audio_bps) * float(duration_seconds) / 8 * 1.1)
+        return max(int(source_size), estimate)
+    return max(1, int(source_size))
+
+
+def validate_processing_capacity(source_size, duration_seconds=None):
+    validate_capacity(
+        estimated_transcode_size(duration_seconds, source_size),
+        action="Procesare",
+    )
+
+
+def _bitrate_to_bits(value):
+    text = str(value).strip().lower()
+    multipliers = {"k": 1000, "m": 1000 * 1000, "g": 1000 * 1000 * 1000}
+    if text[-1:] in multipliers:
+        return int(float(text[:-1]) * multipliers[text[-1]])
+    return int(float(text))
+
+
+def safe_media_path(relative_name):
+    if not relative_name:
+        raise ValueError("Calea media este goală.")
+    root = Path(settings.MEDIA_ROOT).resolve()
+    candidate = (root / str(relative_name)).resolve()
+    candidate.relative_to(root)
+    return candidate
+
+
+def sha256_for_path(path, chunk_size=1024 * 1024):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as source:
+        for chunk in iter(lambda: source.read(chunk_size), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _validate_image(uploaded_file, expected_format):
@@ -176,7 +245,8 @@ def inspect_uploaded_file(uploaded_file):
     limit_mb = settings.MAX_IMAGE_UPLOAD_MB if media_type == "image" else settings.MAX_VIDEO_UPLOAD_MB
     if file_size > limit_mb * MEBIBYTE:
         raise ValidationError(f"Fișierul depășește limita de {limit_mb} MB.")
-    validate_capacity(file_size)
+    required_bytes = file_size * 2 if media_type == "video" else file_size
+    validate_capacity(required_bytes)
     if media_type == "image":
         _validate_image(uploaded_file, expected_format)
     else:

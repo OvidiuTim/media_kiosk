@@ -41,10 +41,57 @@ if (uploadForm) {
     button.disabled = true; button.textContent = "Se încarcă…"; errorBox.classList.add("d-none"); progress.classList.remove("d-none"); status.classList.remove("d-none"); status.textContent = "Fișierul este trimis către server…";
     const xhr = new XMLHttpRequest(); xhr.open("POST", uploadForm.dataset.uploadUrl); xhr.setRequestHeader("X-CSRFToken", decodeURIComponent(getCookie("csrftoken")));
     xhr.upload.onprogress = (e) => { if (e.lengthComputable) { const pct = Math.round(e.loaded / e.total * 100); bar.style.width = pct + "%"; bar.textContent = pct + "%"; progress.setAttribute("aria-valuenow", String(pct)); if (pct === 100) status.textContent = "Upload finalizat. Serverul verifică fișierul și calculează checksum-ul…"; } };
-    xhr.onload = () => { let body = {}; try { body = JSON.parse(xhr.responseText); } catch (_) { body = {}; } if (xhr.status >= 200 && xhr.status < 300 && body.success) { status.textContent = "Material salvat. Se deschide biblioteca…"; window.location.assign(body.redirect_url); return; } errorBox.textContent = body.error || "Uploadul nu a putut fi finalizat."; errorBox.classList.remove("d-none"); status.classList.add("d-none"); button.disabled = false; button.textContent = "Încarcă pe server"; };
+    xhr.onload = () => { let body = {}; try { body = JSON.parse(xhr.responseText); } catch (_) { body = {}; } if (xhr.status >= 200 && xhr.status < 300 && body.success) { status.textContent = body.message || "Material salvat. Se deschide biblioteca…"; setTimeout(() => window.location.assign(body.redirect_url), 2200); return; } errorBox.textContent = body.error || "Uploadul nu a putut fi finalizat."; errorBox.classList.remove("d-none"); status.classList.add("d-none"); button.disabled = false; button.textContent = "Încarcă pe server"; };
     xhr.onerror = () => { errorBox.textContent = "Conexiunea cu serverul a fost întreruptă."; errorBox.classList.remove("d-none"); status.classList.add("d-none"); button.disabled = false; button.textContent = "Încarcă pe server"; };
     xhr.send(new FormData(uploadForm));
   });
+}
+
+const mediaGrid = document.querySelector("#media-grid");
+if (mediaGrid) {
+  const cards = [...mediaGrid.querySelectorAll(".js-video-processing")];
+  const renderProcessing = (card, item) => {
+    card.dataset.status = item.status;
+    const processing = item.status === "processing";
+    const failed = item.status === "failed";
+    const ready = item.status === "ready";
+    card.querySelector(".js-processing-label").textContent = processing ? `Se optimizează – ${item.progress}%` : item.status_label;
+    const progress = card.querySelector(".js-processing-progress");
+    progress.classList.toggle("d-none", !processing);
+    progress.setAttribute("aria-valuenow", String(item.progress));
+    card.querySelector(".js-processing-bar").style.width = `${item.progress}%`;
+    const details = card.querySelector(".js-processing-details");
+    details.textContent = ready ? [item.original_size && item.final_size ? `${item.original_size} → ${item.final_size}` : "", [item.resolution, item.video_codec].filter(Boolean).join(" · ")].filter(Boolean).join(" · ") : "";
+    const error = card.querySelector(".js-processing-error");
+    error.textContent = failed ? item.error : "";
+    error.classList.toggle("d-none", !failed);
+    card.querySelector(".js-processing-retry").classList.toggle("d-none", !item.can_retry);
+  };
+  let polling = cards.some((card) => ["queued", "processing"].includes(card.dataset.status));
+  const poll = async () => {
+    if (!polling || !cards.length) return;
+    try {
+      const ids = cards.map((card) => card.dataset.mediaId).join(",");
+      const response = await fetch(`${mediaGrid.dataset.statusUrl}?ids=${encodeURIComponent(ids)}`, {headers: {"Accept": "application/json"}});
+      if (!response.ok) throw new Error();
+      const body = await response.json();
+      body.items.forEach((item) => { const card = cards.find((node) => node.dataset.mediaId === String(item.id)); if (card) renderProcessing(card, item); });
+      polling = cards.some((card) => ["queued", "processing"].includes(card.dataset.status));
+    } catch (_) { polling = true; }
+    if (polling) setTimeout(poll, 2500);
+  };
+  cards.forEach((card) => card.querySelector(".js-processing-retry")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget; button.disabled = true;
+    try {
+      const response = await fetch(button.dataset.retryUrl, {method: "POST", headers: {"X-CSRFToken": decodeURIComponent(getCookie("csrftoken")), "Accept": "application/json"}});
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "Procesarea nu a putut fi reluată.");
+      renderProcessing(card, body.item); polling = true; setTimeout(poll, 250);
+    } catch (error) {
+      const errorBox = card.querySelector(".js-processing-error"); errorBox.textContent = error.message; errorBox.classList.remove("d-none"); button.disabled = false;
+    }
+  }));
+  if (polling) setTimeout(poll, 800);
 }
 
 const itemList = document.querySelector("#playlist-items");

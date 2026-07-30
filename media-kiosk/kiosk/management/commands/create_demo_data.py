@@ -30,7 +30,11 @@ class Command(BaseCommand):
                 "original_filename": "oferta-lunii.png",
                 "mime_type": "image/png",
                 "file_size": len(content),
+                "original_file_size": len(content),
+                "final_file_size": len(content),
                 "checksum": hashlib.sha256(content).hexdigest(),
+                "processing_status": MediaAsset.READY,
+                "processing_progress": 100,
             },
         )
         if not image.file or not image.file.storage.exists(image.file.name):
@@ -38,7 +42,11 @@ class Command(BaseCommand):
             image.original_filename = "oferta-lunii.png"
             image.mime_type = "image/png"
             image.file_size = len(content)
+            image.original_file_size = len(content)
+            image.final_file_size = len(content)
             image.checksum = hashlib.sha256(content).hexdigest()
+            image.processing_status = MediaAsset.READY
+            image.processing_progress = 100
             image.file.save("oferta-lunii.png", ContentFile(content), save=False)
             image.save()
 

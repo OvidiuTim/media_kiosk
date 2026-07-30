@@ -1,6 +1,9 @@
 import uuid
 from pathlib import Path
 
+from django.conf import settings
+from django.core.files.storage import default_storage
+from django.core.exceptions import SuspiciousFileOperation, ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models, transaction
 from django.db.models.signals import post_delete
@@ -13,6 +16,11 @@ def media_upload_path(instance, filename):
     folder = "images" if instance.media_type == MediaAsset.IMAGE else "videos"
     now = timezone.now()
     return f"kiosk/{folder}/{now:%Y/%m}/{uuid.uuid4().hex}{extension}"
+
+
+def video_source_upload_path(instance, filename):
+    now = timezone.now()
+    return f"kiosk/sources/{now:%Y/%m}/{uuid.uuid4().hex}.mp4"
 
 
 class TimeStampedModel(models.Model):
@@ -41,6 +49,11 @@ class Playlist(TimeStampedModel):
     @transaction.atomic
     def publish(self):
         locked = Playlist.objects.select_for_update().get(pk=self.pk)
+        unavailable = locked.items.select_related("media_asset").filter(
+            media_asset__media_type=MediaAsset.VIDEO
+        ).exclude(media_asset__processing_status=MediaAsset.READY)
+        if unavailable.exists():
+            raise ValidationError("Playlistul conține videoclipuri care nu sunt încă pregătite.")
         version = locked.published_version + 1
         now = timezone.now()
         snapshot, _ = PublishedPlaylist.objects.get_or_create(playlist=locked)
@@ -95,15 +108,47 @@ class MediaAsset(TimeStampedModel):
     IMAGE = "image"
     VIDEO = "video"
     TYPE_CHOICES = [(IMAGE, "Imagine"), (VIDEO, "Videoclip")]
+    QUEUED = "queued"
+    PROCESSING = "processing"
+    READY = "ready"
+    FAILED = "failed"
+    PROCESSING_CHOICES = [
+        (QUEUED, "În așteptare"),
+        (PROCESSING, "Se optimizează"),
+        (READY, "Pregătit"),
+        (FAILED, "Procesarea a eșuat"),
+    ]
 
     title = models.CharField("titlu", max_length=200)
     media_type = models.CharField("tip", max_length=10, choices=TYPE_CHOICES)
     file = models.FileField("fișier", upload_to=media_upload_path, max_length=500, blank=True, default="")
+    source_file = models.FileField(
+        "sursă temporară", upload_to=video_source_upload_path, max_length=500, blank=True, default=""
+    )
     original_filename = models.CharField("nume fișier original", max_length=255)
     mime_type = models.CharField("tip MIME", max_length=100)
     file_size = models.PositiveBigIntegerField("dimensiune")
     checksum = models.CharField("checksum", max_length=128, blank=True, null=True)
     is_active = models.BooleanField("activ", default=True)
+    processing_status = models.CharField(
+        "status procesare", max_length=20, choices=PROCESSING_CHOICES, default=READY, db_index=True
+    )
+    processing_progress = models.PositiveSmallIntegerField("progres procesare", default=100)
+    processing_error = models.CharField("eroare procesare", max_length=500, blank=True)
+    original_file_size = models.PositiveBigIntegerField("dimensiune originală", default=0)
+    final_file_size = models.PositiveBigIntegerField("dimensiune finală", default=0)
+    duration_seconds = models.FloatField("durată secunde", null=True, blank=True)
+    video_width = models.PositiveIntegerField("lățime video", null=True, blank=True)
+    video_height = models.PositiveIntegerField("înălțime video", null=True, blank=True)
+    video_codec = models.CharField("codec video", max_length=64, blank=True)
+    audio_codec = models.CharField("codec audio", max_length=64, blank=True)
+    queued_at = models.DateTimeField("introdus în coadă", null=True, blank=True)
+    processing_started_at = models.DateTimeField("procesare începută", null=True, blank=True)
+    processing_finished_at = models.DateTimeField("procesare finalizată", null=True, blank=True)
+    processing_attempts = models.PositiveIntegerField("încercări procesare", default=0)
+    worker_token = models.UUIDField("identificator worker", null=True, blank=True, editable=False)
+    worker_pid = models.PositiveIntegerField("PID worker", null=True, blank=True, editable=False)
+    processing_output = models.CharField("output temporar", max_length=500, blank=True, editable=False)
 
     class Meta:
         ordering = ["-created_at"]
@@ -112,6 +157,20 @@ class MediaAsset(TimeStampedModel):
 
     def __str__(self):
         return self.title
+
+    @property
+    def is_ready(self):
+        return self.media_type == self.IMAGE or self.processing_status == self.READY
+
+
+class MediaProcessingLock(models.Model):
+    singleton = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    worker_token = models.UUIDField(null=True, blank=True, editable=False)
+    acquired_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "blocare procesare media"
+        verbose_name_plural = "blocări procesare media"
 
 
 class PlaylistItem(TimeStampedModel):
@@ -158,14 +217,28 @@ class PublishedPlaylistItem(TimeStampedModel):
 
 
 @receiver(post_delete, sender=MediaAsset)
-def delete_media_file_after_commit(sender, instance, using, **kwargs):
-    if not instance.file or not instance.file.name:
-        return
-    storage = instance.file.storage
-    file_name = instance.file.name
+def delete_media_files_after_commit(sender, instance, using, **kwargs):
+    candidates = []
+    if instance.file and instance.file.name:
+        candidates.append((instance.file.storage, instance.file.name))
+    if instance.source_file and instance.source_file.name:
+        candidates.append((instance.source_file.storage, instance.source_file.name))
+    if instance.processing_output:
+        candidates.append((default_storage, instance.processing_output))
 
-    def remove_file():
-        if storage.exists(file_name):
-            storage.delete(file_name)
+    def remove_files():
+        media_root = Path(settings.MEDIA_ROOT).resolve()
+        seen = set()
+        for storage, file_name in candidates:
+            if file_name in seen:
+                continue
+            seen.add(file_name)
+            try:
+                candidate = Path(storage.path(file_name)).resolve()
+                candidate.relative_to(media_root)
+                if candidate.exists() and candidate.is_file():
+                    candidate.unlink()
+            except (NotImplementedError, OSError, SuspiciousFileOperation, ValueError):
+                continue
 
-    transaction.on_commit(remove_file, using=using, robust=True)
+    transaction.on_commit(remove_files, using=using, robust=True)

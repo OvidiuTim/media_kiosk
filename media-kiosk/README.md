@@ -61,6 +61,51 @@ DATABASE_URL=postgresql://media_kiosk:PAROLA@127.0.0.1:5432/media_kiosk
 
 `MAX_TOTAL_MEDIA_GB` limitează întreaga bibliotecă, iar `MIN_FREE_DISK_GB` păstrează o rezervă pe partiție. Fișierele mai mari de aproximativ 2,5 MB folosesc handlerul temporar standard Django și nu sunt încărcate integral în RAM.
 
+### Optimizarea automată a videoclipurilor
+
+FFmpeg și ffprobe trebuie instalate numai pe server, nu pe calculatorul utilizatorului:
+
+```bash
+sudo apt update
+sudo apt install ffmpeg
+ffmpeg -version
+ffprobe -version
+```
+
+Adaugă în `.env`:
+
+```env
+FFMPEG_BINARY=ffmpeg
+FFPROBE_BINARY=ffprobe
+VIDEO_TRANSCODING_ENABLED=True
+VIDEO_MAX_WIDTH=1920
+VIDEO_MAX_HEIGHT=1080
+VIDEO_MAX_FPS=30
+VIDEO_CRF=23
+VIDEO_MAX_BITRATE=5M
+VIDEO_AUDIO_BITRATE=128k
+VIDEO_PROCESSING_STALE_MINUTES=30
+VIDEO_QUEUE_SLEEP_SECONDS=5
+```
+
+Pentru serverul de aproximativ 25 GB, valorile recomandate sunt `MAX_TOTAL_MEDIA_GB=8` și `MIN_FREE_DISK_GB=5`. Limita include sursele temporare, outputurile `.part.mp4` și fișierele finale.
+
+După upload, imaginile devin imediat `ready`. Videoclipurile trec prin `queued → processing → ready`; sursa este eliminată numai după verificarea rezultatului și înlocuirea atomică. La eroare, sursa rămâne disponibilă pentru **Reîncearcă**. Dacă FFmpeg lipsește, uploadul rămâne funcțional, videoclipul este marcat cu eroare clară, iar imaginile nu sunt afectate.
+
+Pentru o singură procesare locală:
+
+```bash
+python manage.py process_media_queue
+```
+
+Pentru worker continuu:
+
+```bash
+python manage.py process_media_queue --watch --sleep 5
+```
+
+Workerul folosește o blocare persistentă în baza de date și procesează global un singur videoclip. Joburile rămase în `processing` după un restart sunt recuperate după `VIDEO_PROCESSING_STALE_MINUTES`.
+
 ## Upload și validare
 
 Pagina **Materiale → Încarcă material** trimite fișierul către Django prin `XMLHttpRequest`, cu CSRF și progres vizual. Serverul verifică:
@@ -119,11 +164,11 @@ Exemplul folosește utilizatorul de serviciu `media-kiosk` pentru Gunicorn și g
 ```bash
 sudo useradd --system --home /var/www/media-kiosk --shell /usr/sbin/nologin media-kiosk
 sudo install -d -o media-kiosk -g www-data -m 0750 /var/www/media-kiosk
-sudo install -d -o media-kiosk -g www-data -m 2750 /var/www/media-kiosk/media
+sudo install -d -o media-kiosk -g www-data -m 2770 /var/www/media-kiosk/media
 sudo install -d -o media-kiosk -g www-data -m 0750 /var/www/media-kiosk/staticfiles
 ```
 
-Gunicorn trebuie să poată scrie în `MEDIA_ROOT`; Nginx trebuie să poată traversa directoarele și citi fișierele. Django creează fișiere cu `0640` și directoare cu `0750`. Bitul setgid de pe directorul media păstrează grupul `www-data`. Nu folosi permisiuni `777`.
+Gunicorn și workerul `deploy:www-data` trebuie să poată scrie în `MEDIA_ROOT`; Nginx trebuie să poată traversa directoarele și citi fișierele. Django creează fișiere cu `0640` și directoare cu `0750`. Directorul rădăcină media are grupul `www-data`, bit setgid și drept de scriere pentru grup. Nu folosi permisiuni `777`.
 
 Verifică identitatea proceselor și permisiunile:
 
@@ -131,8 +176,44 @@ Verifică identitatea proceselor și permisiunile:
 ps -eo user,group,cmd | grep -E 'gunicorn|nginx'
 namei -l /var/www/media-kiosk/media
 sudo -u media-kiosk test -w /var/www/media-kiosk/media
+sudo -u deploy test -w /var/www/media-kiosk/media
 sudo -u www-data test -r /var/www/media-kiosk/media
 ```
+
+## Workerul systemd pentru transcodare
+
+Fișierul complet este inclus în `deploy/media-kiosk-transcoder.service`. Instalează-l separat de serviciul Gunicorn și de orice `gunicorn-task.service` sau `gunicorn-taskapp.service`:
+
+```bash
+sudo cp deploy/media-kiosk-transcoder.service /etc/systemd/system/media-kiosk-transcoder.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now media-kiosk-transcoder.service
+sudo systemctl status media-kiosk-transcoder.service
+journalctl -u media-kiosk-transcoder.service -f
+```
+
+Serviciul rulează cu `User=deploy`, `Group=www-data`, `Nice=15`, `CPUQuota=40%` și `IOSchedulingClass=idle`. Comanda `ExecStart` este:
+
+```text
+/home/deploy/media-kiosk/.venv/bin/python /home/deploy/media-kiosk/media-kiosk/manage.py process_media_queue --watch --sleep 5
+```
+
+Nu porni workerul din Gunicorn și nu adăuga mai multe instanțe. Blocarea din baza de date împiedică procesarea simultană chiar dacă serviciul este pornit accidental de două ori.
+
+### Migrare și activare în producție
+
+```bash
+cd /home/deploy/media-kiosk/media-kiosk
+source /home/deploy/media-kiosk/.venv/bin/activate
+pip install -r requirements.txt
+python manage.py migrate
+python manage.py check
+python manage.py collectstatic --noinput
+sudo systemctl restart media-kiosk.service
+sudo systemctl restart media-kiosk-transcoder.service
+```
+
+Migrarea păstrează materialele și snapshoturile existente. Imaginile și videoclipurile existente sunt marcate inițial `ready`; pentru videoclipurile vechi apare acțiunea **Optimizează videoclipul**. În timpul reoptimizării, versiunea publicată existentă rămâne disponibilă. După succes, snapshoturile afectate primesc noul fișier, checksum și dimensiune, iar versiunea/ETag-ul playlistului este incrementată automat.
 
 ## Gunicorn prin systemd
 

@@ -19,8 +19,10 @@
     <div class="storage-free"><strong>{{ free_display }}</strong><span>liberi pe disc</span></div>
   </div>
   <div class="storage-progress" role="progressbar" aria-label="Spațiu media utilizat" aria-valuenow="{{ used_percent }}" aria-valuemin="0" aria-valuemax="100"><span style="width: {{ used_percent }}%"></span></div>
+  <div class="storage-breakdown"><span>Surse temporare <strong>{{ source_display }}</strong></span><span>În procesare <strong>{{ processing_display }}</strong></span><span>Fișiere finale <strong>{{ final_display }}</strong></span></div>
   <div class="storage-foot"><span>{{ used_percent }}% din limita media utilizată</span><a href="{% url 'media_upload' %}">Adaugă conținut →</a></div>
 </section>
+{% if queued_video_count or processing_video_count or failed_video_count %}<div class="queue-summary mt-3"><span>În așteptare: <strong>{{ queued_video_count }}</strong></span><span>În procesare: <strong>{{ processing_video_count }}</strong></span><span>Eșuate: <strong>{{ failed_video_count }}</strong></span></div>{% endif %}
 
 <div class="row g-4 mt-1">
   <div class="col-xl-8">

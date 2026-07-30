@@ -1,0 +1,23 @@
+[Unit]
+Description=Media Kiosk video transcoder
+After=network.target
+
+[Service]
+Type=simple
+User=deploy
+Group=www-data
+WorkingDirectory=/home/deploy/media-kiosk/media-kiosk
+EnvironmentFile=/home/deploy/media-kiosk/media-kiosk/.env
+ExecStart=/home/deploy/media-kiosk/.venv/bin/python /home/deploy/media-kiosk/media-kiosk/manage.py process_media_queue --watch --sleep 5
+Restart=on-failure
+RestartSec=5
+Nice=15
+CPUQuota=40%
+IOSchedulingClass=idle
+KillSignal=SIGTERM
+TimeoutStopSec=60
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

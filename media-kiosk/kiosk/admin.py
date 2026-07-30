@@ -22,11 +22,15 @@ class DeviceAdmin(admin.ModelAdmin):
 
 @admin.register(MediaAsset)
 class MediaAssetAdmin(admin.ModelAdmin):
-    list_display = ("title", "media_type", "file_size", "is_active", "created_at")
-    list_filter = ("media_type", "is_active")
+    list_display = ("title", "media_type", "processing_status", "processing_progress", "file_size", "is_active", "created_at")
+    list_filter = ("media_type", "processing_status", "is_active")
     search_fields = ("title", "original_filename")
+    readonly_fields = (
+        "processing_progress", "processing_error", "original_file_size", "final_file_size",
+        "duration_seconds", "video_width", "video_height", "video_codec", "audio_codec",
+        "queued_at", "processing_started_at", "processing_finished_at", "processing_attempts",
+    )
 
 
 admin.site.register(PublishedPlaylist)
 admin.site.register(PublishedPlaylistItem)
-

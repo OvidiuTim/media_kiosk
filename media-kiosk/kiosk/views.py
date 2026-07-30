@@ -16,7 +16,8 @@ from django.views.decorators.http import require_http_methods, require_POST
 
 from .forms import DeviceForm, MediaAssetForm, MediaUploadForm, PlaylistForm
 from .models import Device, MediaAsset, Playlist, PlaylistItem
-from .services import storage_stats
+from .services import format_bytes, storage_stats
+from .video_processing import queue_existing_video, retry_processing, transcoding_availability
 
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,9 @@ def dashboard(request):
             Q(last_seen_at__lt=stale_before) | Q(last_seen_at__isnull=True)
         ).count(),
         "recent_devices": Device.objects.select_related("assigned_playlist").order_by("-last_seen_at")[:6],
+        "queued_video_count": MediaAsset.objects.filter(media_type="video", processing_status="queued").count(),
+        "processing_video_count": MediaAsset.objects.filter(media_type="video", processing_status="processing").count(),
+        "failed_video_count": MediaAsset.objects.filter(media_type="video", processing_status="failed").count(),
     }
     context.update(storage_stats())
     return render(request, "kiosk/dashboard.html", context)
@@ -84,26 +88,46 @@ def media_upload(request):
             return JsonResponse({"success": False, "error": first_form_error(form)}, status=400)
         uploaded_file = form.cleaned_data["file"]
         inspection = form.inspection
+        is_video = inspection.media_type == MediaAsset.VIDEO
+        available, availability_error = transcoding_availability()
         asset = MediaAsset(
             title=form.cleaned_data["title"],
             media_type=inspection.media_type,
-            file=uploaded_file,
+            file="" if is_video else uploaded_file,
+            source_file=uploaded_file if is_video else "",
             original_filename=inspection.original_filename,
             mime_type=inspection.mime_type,
             file_size=inspection.file_size,
-            checksum=inspection.checksum,
+            checksum="" if is_video else inspection.checksum,
+            original_file_size=inspection.file_size,
+            final_file_size=0 if is_video else inspection.file_size,
+            processing_status=(MediaAsset.QUEUED if available else MediaAsset.FAILED) if is_video else MediaAsset.READY,
+            processing_progress=0 if is_video else 100,
+            processing_error=availability_error if is_video and not available else "",
+            queued_at=timezone.now() if is_video else None,
         )
         try:
             with transaction.atomic():
                 asset.save()
         except Exception:
-            if asset.file and asset.file.name and asset.file.storage.exists(asset.file.name):
-                asset.file.storage.delete(asset.file.name)
+            for stored_file in (asset.file, asset.source_file):
+                if stored_file and stored_file.name and stored_file.storage.exists(stored_file.name):
+                    stored_file.storage.delete(stored_file.name)
             logger.exception("Salvarea unui material media a eșuat.")
             return JsonResponse(
                 {"success": False, "error": "Fișierul nu a putut fi salvat. Încearcă din nou."}, status=500
             )
-        return JsonResponse({"success": True, "asset_id": asset.pk, "redirect_url": reverse("media_list")}, status=201)
+        message = (
+            "Videoclipul a fost încărcat și va fi optimizat automat. Poți închide această pagină."
+            if is_video and available
+            else availability_error if is_video else "Materialul a fost salvat și este pregătit."
+        )
+        return JsonResponse({
+            "success": True,
+            "asset_id": asset.pk,
+            "redirect_url": reverse("media_list"),
+            "message": message,
+        }, status=201)
     return render(request, "kiosk/media_upload.html", {
         "form": MediaUploadForm(),
         "max_image_mb": settings.MAX_IMAGE_UPLOAD_MB,
@@ -149,6 +173,67 @@ def media_delete(request, pk):
     return render(request, "kiosk/media_delete.html", {"asset": asset, "usage_count": usage_count})
 
 
+def media_status_payload(asset):
+    return {
+        "id": asset.pk,
+        "status": asset.processing_status,
+        "status_label": asset.get_processing_status_display(),
+        "progress": asset.processing_progress,
+        "error": asset.processing_error if asset.processing_status == MediaAsset.FAILED else "",
+        "original_size": format_bytes(asset.original_file_size),
+        "final_size": format_bytes(asset.final_file_size) if asset.final_file_size else "",
+        "resolution": f"{asset.video_height}p" if asset.video_height else "",
+        "video_codec": asset.video_codec,
+        "audio_codec": asset.audio_codec,
+        "can_retry": asset.media_type == MediaAsset.VIDEO and asset.processing_status == MediaAsset.FAILED and bool(asset.source_file),
+        "can_optimize": asset.media_type == MediaAsset.VIDEO and asset.processing_status == MediaAsset.READY and bool(asset.file),
+    }
+
+
+@staff_member_required(login_url="login")
+def media_processing_status(request):
+    raw_ids = request.GET.get("ids", "")
+    try:
+        ids = {int(value) for value in raw_ids.split(",") if value.strip()}
+    except ValueError:
+        return JsonResponse({"success": False, "error": "Lista materialelor este invalidă."}, status=400)
+    if len(ids) > 200:
+        return JsonResponse({"success": False, "error": "Sunt prea multe materiale solicitate."}, status=400)
+    assets = MediaAsset.objects.filter(pk__in=ids, media_type=MediaAsset.VIDEO)
+    return JsonResponse({"success": True, "items": [media_status_payload(asset) for asset in assets]})
+
+
+@staff_member_required(login_url="login")
+@require_POST
+def media_retry(request, pk):
+    asset = get_object_or_404(MediaAsset, pk=pk)
+    try:
+        retry_processing(asset)
+    except ValidationError as exc:
+        return JsonResponse({"success": False, "error": exc.messages[0]}, status=400)
+    asset.refresh_from_db()
+    return JsonResponse({"success": True, "item": media_status_payload(asset)})
+
+
+@staff_member_required(login_url="login")
+@require_POST
+def media_optimize(request, pk):
+    asset = get_object_or_404(MediaAsset, pk=pk)
+    try:
+        available, error = transcoding_availability()
+        if not available:
+            raise ValidationError(error)
+        queue_existing_video(asset)
+    except ValidationError as exc:
+        messages.error(request, exc.messages[0])
+    except OSError:
+        logger.exception("Copierea sursei pentru optimizare a eșuat.")
+        messages.error(request, "Videoclipul nu a putut fi introdus în coada de optimizare.")
+    else:
+        messages.success(request, "Videoclipul a fost introdus în coada de optimizare.")
+    return redirect("media_list")
+
+
 @staff_member_required(login_url="login")
 def playlist_list(request):
     return render(request, "kiosk/playlist_list.html", {"playlists": Playlist.objects.prefetch_related("items", "devices")})
@@ -174,10 +259,16 @@ def playlist_edit(request, pk):
         form.save()
         messages.success(request, "Detaliile draftului au fost salvate.")
         return redirect("playlist_edit", pk=pk)
+    items = playlist.items.select_related("media_asset").order_by("position")
     return render(request, "kiosk/playlist_editor.html", {
         "playlist": playlist,
         "form": form,
-        "items": playlist.items.select_related("media_asset").order_by("position"),
+        "items": items,
+        "has_unready_items": any(
+            item.media_asset.media_type == MediaAsset.VIDEO
+            and item.media_asset.processing_status != MediaAsset.READY
+            for item in items
+        ),
         "available_assets": MediaAsset.objects.filter(is_active=True).order_by("title"),
     })
 
@@ -189,6 +280,8 @@ def playlist_add_item(request, pk):
     try:
         data = json_body(request)
         asset = MediaAsset.objects.get(pk=data.get("media_asset_id"), is_active=True)
+        if asset.media_type == MediaAsset.VIDEO and asset.processing_status != MediaAsset.READY:
+            raise ValidationError("Videoclipul nu este încă pregătit pentru playlist.")
         with transaction.atomic():
             locked = Playlist.objects.select_for_update().get(pk=playlist.pk)
             position = (locked.items.aggregate(m=Max("position"))["m"] or 0) + 1
@@ -264,7 +357,11 @@ def playlist_item_delete(request, pk, item_pk):
 @require_POST
 def playlist_publish(request, pk):
     playlist = get_object_or_404(Playlist, pk=pk)
-    playlist.publish()
+    try:
+        playlist.publish()
+    except ValidationError as exc:
+        messages.error(request, exc.messages[0])
+        return redirect("playlist_edit", pk=pk)
     messages.success(request, f"Playlist publicat: versiunea {playlist.published_version}.")
     return redirect("playlist_edit", pk=pk)
 
