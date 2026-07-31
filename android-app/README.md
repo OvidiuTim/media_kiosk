@@ -59,7 +59,8 @@ Pe API 22 clientul permite TLS 1.2. Pe Android modern rămâne configurația TLS
 La prima pornire se introduc:
 
 1. adresa serverului, implicit `https://kiosk.dmxconstruction.ro`;
-2. UUID-ul copiat din panoul Django la crearea tabletei;
+2. UUID-ul dispozitivului; la prima configurare este completat implicit cu
+   `60ddc746-21be-4e15-a7d8-bbe482271c55` și poate fi înlocuit cu UUID-ul din panoul Django;
 3. limita cache: 256 MB, 512 MB, 1 GB sau 2 GB;
 4. orientarea: peisaj, portret sau automată;
 5. un PIN administrativ ales local, de minimum patru cifre.

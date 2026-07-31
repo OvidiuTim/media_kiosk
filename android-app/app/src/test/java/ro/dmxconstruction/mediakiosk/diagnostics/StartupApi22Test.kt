@@ -55,6 +55,10 @@ class StartupApi22Test {
     @Test fun `tema si ecranul de configurare se incarca pe API 22`() {
         Robolectric.buildActivity(SetupActivity::class.java).setup().use { controller ->
             assertNotNull(controller.get().findViewById<TextView>(R.id.serverInput))
+            assertEquals(
+                ConfigStore.DEFAULT_DEVICE_KEY,
+                controller.get().findViewById<TextView>(R.id.deviceKeyInput).text.toString()
+            )
             val testButton = controller.get().findViewById<TextView>(R.id.testButton)
             val saveButton = controller.get().findViewById<TextView>(R.id.saveButton)
             assertFalse(testButton is Button)

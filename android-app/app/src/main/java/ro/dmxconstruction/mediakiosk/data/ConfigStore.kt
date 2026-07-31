@@ -68,6 +68,7 @@ class ConfigStore(context: Context) {
 
     companion object {
         const val DEFAULT_SERVER = "https://kiosk.dmxconstruction.ro"
+        const val DEFAULT_DEVICE_KEY = "60ddc746-21be-4e15-a7d8-bbe482271c55"
         const val DEFAULT_CACHE = 1024L * 1024 * 1024
         private const val KEY_CONFIGURED = "configured"
         private const val KEY_AUTOSTART = "autostart_enabled"

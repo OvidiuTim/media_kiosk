@@ -10,6 +10,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -35,7 +36,9 @@ class SetupActivityTest {
         ActivityScenario.launch(SetupActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 assertTrue(activity.findViewById<EditText>(R.id.serverInput).isShown)
-                assertTrue(activity.findViewById<EditText>(R.id.deviceKeyInput).isShown)
+                val deviceKeyInput = activity.findViewById<EditText>(R.id.deviceKeyInput)
+                assertTrue(deviceKeyInput.isShown)
+                assertEquals(ConfigStore.DEFAULT_DEVICE_KEY, deviceKeyInput.text.toString())
                 assertTrue(activity.findViewById<Spinner>(R.id.cacheSpinner).isShown)
                 assertTrue(activity.findViewById<Spinner>(R.id.orientationSpinner).isShown)
                 assertTrue(activity.findViewById<EditText>(R.id.pinInput).isShown)

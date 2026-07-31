@@ -47,7 +47,7 @@ class SetupActivity : AppCompatActivity() {
     private fun populate() {
         val existing = configStore.load()
         binding.serverInput.setText(existing?.serverUrl ?: ConfigStore.DEFAULT_SERVER)
-        binding.deviceKeyInput.setText(existing?.deviceKey.orEmpty())
+        binding.deviceKeyInput.setText(existing?.deviceKey ?: ConfigStore.DEFAULT_DEVICE_KEY)
         binding.cacheSpinner.setSelection(cacheOptions.indexOf(existing?.cacheLimitBytes ?: ConfigStore.DEFAULT_CACHE).coerceAtLeast(0))
         binding.orientationSpinner.setSelection(
             when (existing?.orientation ?: ScreenOrientation.LANDSCAPE) {
