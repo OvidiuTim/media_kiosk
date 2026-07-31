@@ -6,7 +6,7 @@ import kotlinx.coroutines.job
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
+import okhttp3.Call
 import okhttp3.Request
 import ro.dmxconstruction.mediakiosk.data.MediaItemDto
 import java.io.File
@@ -17,7 +17,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 class MediaCache(
     private val directory: File,
-    private val client: OkHttpClient,
+    private val client: Call.Factory,
     private val limitBytes: Long
 ) {
     private val locks = ConcurrentHashMap<String, Mutex>()

@@ -96,6 +96,22 @@ class PlaylistRepositoryTest {
         assertFalse(PlaylistRepository(PlaylistStore(temporary.root), apiProvider = { api }).heartbeat(config))
     }
 
+    @Test fun `debug afiseaza stack trace-ul complet pentru eroarea TLS`() = runTest {
+        val api = FakeApi().apply {
+            failure = javax.net.ssl.SSLHandshakeException("lanț ISRG invalid")
+        }
+        val result = PlaylistRepository(
+            PlaylistStore(temporary.root),
+            apiProvider = { api }
+        ).sync(config)
+
+        assertTrue(result is SyncResult.Failure)
+        val message = (result as SyncResult.Failure).message
+        assertTrue(message.contains("Conexiunea HTTPS nu a putut fi validată."))
+        assertTrue(message.contains("javax.net.ssl.SSLHandshakeException: lanț ISRG invalid"))
+        assertTrue(message.contains("PlaylistRepositoryTest"))
+    }
+
     private fun validResponse() = PlaylistResponse(
         true, device = DeviceDto(1, "Tabletă"), playlist = PlaylistDto(2, "Recepție", 1), items = listOf(mediaItem())
     )

@@ -15,6 +15,7 @@ import ro.dmxconstruction.mediakiosk.data.PlaylistStore
 import ro.dmxconstruction.mediakiosk.data.RuntimeStateStore
 import ro.dmxconstruction.mediakiosk.data.ScreenOrientation
 import ro.dmxconstruction.mediakiosk.data.ServerUrl
+import ro.dmxconstruction.mediakiosk.data.SecureNetwork
 import ro.dmxconstruction.mediakiosk.data.SyncResult
 import ro.dmxconstruction.mediakiosk.databinding.ActivitySetupBinding
 import ro.dmxconstruction.mediakiosk.diagnostics.CrashReportNavigator
@@ -73,7 +74,11 @@ class SetupActivity : AppCompatActivity() {
         val config = readConfig() ?: return
         setBusy(true)
         lifecycleScope.launch {
-            val repository = PlaylistRepository(PlaylistStore(filesDir), RuntimeStateStore(this@SetupActivity))
+            val repository = PlaylistRepository(
+                PlaylistStore(filesDir),
+                RuntimeStateStore(this@SetupActivity),
+                calls = SecureNetwork.callFactory(this@SetupActivity)
+            )
             when (val result = repository.sync(config, null, persist = false)) {
                 is SyncResult.Updated -> {
                     validatedSignature = signature(config)

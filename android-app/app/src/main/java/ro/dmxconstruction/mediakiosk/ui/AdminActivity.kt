@@ -12,12 +12,12 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import ro.dmxconstruction.mediakiosk.BuildConfig
 import ro.dmxconstruction.mediakiosk.cache.MediaCache
-import ro.dmxconstruction.mediakiosk.data.ApiFactory
 import ro.dmxconstruction.mediakiosk.data.ConfigStore
 import ro.dmxconstruction.mediakiosk.data.PinResult
 import ro.dmxconstruction.mediakiosk.data.PlaylistRepository
 import ro.dmxconstruction.mediakiosk.data.PlaylistStore
 import ro.dmxconstruction.mediakiosk.data.RuntimeStateStore
+import ro.dmxconstruction.mediakiosk.data.SecureNetwork
 import ro.dmxconstruction.mediakiosk.data.SyncResult
 import ro.dmxconstruction.mediakiosk.databinding.ActivityAdminBinding
 import ro.dmxconstruction.mediakiosk.diagnostics.CrashReportNavigator
@@ -69,7 +69,7 @@ class AdminActivity : AppCompatActivity() {
     }
 
     private fun cache() = configStore.load()?.let {
-        MediaCache(File(filesDir, "media_cache"), ApiFactory.httpClient(), it.cacheLimitBytes)
+        MediaCache(File(filesDir, "media_cache"), SecureNetwork.callFactory(this), it.cacheLimitBytes)
     }
 
     private fun refresh(status: String? = null) {
@@ -150,7 +150,11 @@ class AdminActivity : AppCompatActivity() {
         val config = configStore.load() ?: return
         binding.syncButton.isEnabled = false
         lifecycleScope.launch {
-            val repository = PlaylistRepository(PlaylistStore(filesDir), RuntimeStateStore(this@AdminActivity))
+            val repository = PlaylistRepository(
+                PlaylistStore(filesDir),
+                RuntimeStateStore(this@AdminActivity),
+                calls = SecureNetwork.callFactory(this@AdminActivity)
+            )
             val message = when (val result = repository.sync(config)) {
                 is SyncResult.Updated -> "Playlist actualizat la versiunea ${result.snapshot.playlist.version}."
                 is SyncResult.NotModified -> "Playlistul este deja actualizat."

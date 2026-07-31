@@ -39,6 +39,21 @@ Răspunsul playlistului este validat înainte de folosire: `device`, `playlist`,
 
 Cheia nu este pusă în URL, query, BuildConfig sau loguri. Este salvată numai în SharedPreferences private ale aplicației. PIN-ul este stocat ca hash SHA-256 iterat cu salt aleator; după trei încercări greșite accesul este blocat 30 de secunde.
 
+## HTTPS pe Android 5.1
+
+Android 5.1 de pe unele dispozitive rk3288 nu include în trust store rădăcina necesară lanțului actual Let’s Encrypt. Aplicația include certificatul CA autosemnat **ISRG Root X1**, nu certificatul leaf temporar al domeniului:
+
+- sursă oficială: [Let’s Encrypt — `isrgrootx1.pem`](https://letsencrypt.org/certs/isrgrootx1.pem);
+- subject și issuer: `C=US, O=Internet Security Research Group, CN=ISRG Root X1`;
+- valabilitate: 4 iunie 2015 – 4 iunie 2035;
+- fingerprint certificat SHA-256: `96:BC:EC:06:26:49:76:F3:74:60:77:9A:CF:28:C5:A7:CF:E8:A3:C0:AA:E1:1A:8F:FC:EE:05:C0:BD:DF:08:C6`.
+
+Fingerprint-ul este verificat din nou la runtime înainte de construirea trust managerului. Pentru `kiosk.dmxconstruction.ro`, clientul încearcă mai întâi validarea standard a sistemului și folosește trust store-ul limitat la ISRG Root X1 numai dacă sistemul nu poate construi lanțul. Pentru orice alt hostname se folosește exclusiv clientul standard. Verificarea hostname-ului este implementarea implicită OkHttp; redirecturile fallback către alt host sunt respinse și conexiunile HTTP sunt interzise.
+
+Pe API 22 clientul permite TLS 1.2. Pe Android modern rămâne configurația TLS implicită modernă. Același `Call.Factory` securizat este folosit de Retrofit pentru test/API/sincronizare/heartbeat, de cache-ul media, de Media3 prin `OkHttpDataSource` și de Glide prin `OkHttpUrlLoader`. Astfel imaginile și videoclipurile redate prin streaming nu deschid un flux HTTPS separat cu alt trust manager.
+
+În buildul debug, o eroare TLS afișează și stack trace-ul complet după mesajul pentru utilizator. Buildul nu conține trust-all, `HostnameVerifier` personalizat/permisiv sau tratarea `SSLHandshakeException` ca succes.
+
 ## Configurare și utilizare
 
 La prima pornire se introduc:
@@ -176,11 +191,11 @@ Versiunile au fost alese după metadatele AAR din Google Maven și după `checkD
 | AppCompat | 1.7.1 | metadata `minCompileSdk 34`, manifest `minSdk 21` |
 | Activity KTX | 1.9.3 | 1.10.x cere compileSdk 35; suportă API 22 |
 | Lifecycle Runtime KTX | 2.8.7 | manifest `minSdk 19`, compatibil compileSdk 34 |
-| Media3 ExoPlayer/UI | 1.4.1 | 1.5.x cere compileSdk 35; manifestul 1.4.x are minSdk 19 |
+| Media3 ExoPlayer/UI/OkHttp datasource | 1.4.1 | 1.5.x cere compileSdk 35; manifestul 1.4.x are minSdk 19 |
 | Retrofit / Gson converter | 2.11.0 | client API fără cerință AndroidX minSdk 23 |
 | OkHttp / MockWebServer | 4.12.0 | suport Android 5.0+, folosit streaming pe disc și teste |
 | Coroutines Android | 1.8.1 | compatibil Kotlin 1.9 și API 22 |
-| Glide | 4.16.0 | încărcare/scalare imagini compatibilă API 22 |
+| Glide + OkHttp integration | 4.16.0 | încărcare/scalare imagini prin clientul HTTPS comun, compatibilă API 22 |
 | Robolectric | 4.13 | teste JVM Android; versiune stabilă publicată |
 
 Nu se folosește `tools:overrideLibrary`, Room, Compose, WorkManager sau un TrustManager permisiv.
@@ -221,7 +236,7 @@ Ele verifică ecranul de configurare, navigarea către kiosk fără a folosi pro
 
 Verificare locală din 31 iulie 2026:
 
-- 48 teste JVM: trecute; 11 teste rulează explicit cu profil API 22, inclusiv inflation și auditul acțiunilor/dialogurilor;
+- 57 teste JVM: trecute; 19 teste rulează explicit cu profil API 22, inclusiv TLS, certificatul CA, inflation și auditul acțiunilor/dialogurilor;
 - 14 teste instrumentate pe emulator Android API 37: trecute;
 - `lintDebug`: trecut, fără erori și fără probleme `NewApi`;
 - `assembleDebug`: trecut, APK debug generat;

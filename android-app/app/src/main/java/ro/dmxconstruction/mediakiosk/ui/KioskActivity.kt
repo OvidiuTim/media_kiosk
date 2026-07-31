@@ -17,6 +17,9 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.bumptech.glide.Glide
 import com.bumptech.glide.load.DataSource
 import com.bumptech.glide.load.engine.GlideException
@@ -27,7 +30,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import ro.dmxconstruction.mediakiosk.cache.MediaCache
-import ro.dmxconstruction.mediakiosk.data.ApiFactory
 import ro.dmxconstruction.mediakiosk.data.ConfigStore
 import ro.dmxconstruction.mediakiosk.data.MediaItemDto
 import ro.dmxconstruction.mediakiosk.data.PinResult
@@ -38,12 +40,14 @@ import ro.dmxconstruction.mediakiosk.data.PlaylistSwitcher
 import ro.dmxconstruction.mediakiosk.data.RetryPolicy
 import ro.dmxconstruction.mediakiosk.data.RuntimeStateStore
 import ro.dmxconstruction.mediakiosk.data.ScreenOrientation
+import ro.dmxconstruction.mediakiosk.data.SecureNetwork
 import ro.dmxconstruction.mediakiosk.data.SyncResult
 import ro.dmxconstruction.mediakiosk.databinding.ActivityKioskBinding
 import ro.dmxconstruction.mediakiosk.diagnostics.CrashReportNavigator
 import ro.dmxconstruction.mediakiosk.kiosk.KioskMode
 import java.io.File
 
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class KioskActivity : AppCompatActivity(), Player.Listener {
     private lateinit var binding: ActivityKioskBinding
     private lateinit var player: ExoPlayer
@@ -86,13 +90,17 @@ class KioskActivity : AppCompatActivity(), Player.Listener {
         setContentView(binding.root)
         KioskMode.applyImmersive(this)
 
-        player = ExoPlayer.Builder(this).build().also {
+        val calls = SecureNetwork.callFactory(this)
+        val mediaDataSource = DefaultDataSource.Factory(this, OkHttpDataSource.Factory(calls))
+        player = ExoPlayer.Builder(this)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(mediaDataSource))
+            .build().also {
             it.addListener(this)
             binding.playerView.player = it
         }
         val state = RuntimeStateStore(this)
-        repository = PlaylistRepository(PlaylistStore(filesDir), state)
-        cache = MediaCache(File(filesDir, "media_cache"), ApiFactory.httpClient(), config.cacheLimitBytes)
+        repository = PlaylistRepository(PlaylistStore(filesDir), state, calls = calls)
+        cache = MediaCache(File(filesDir, "media_cache"), calls, config.cacheLimitBytes)
         switcher = PlaylistSwitcher(repository.offline())
         binding.adminHotspot.setOnClickListener { registerHiddenTap() }
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {

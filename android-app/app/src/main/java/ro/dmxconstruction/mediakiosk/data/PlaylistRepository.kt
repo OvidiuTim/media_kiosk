@@ -7,12 +7,20 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import ro.dmxconstruction.mediakiosk.cache.MediaCache
 import com.google.gson.Gson
+import okhttp3.Call
+import ro.dmxconstruction.mediakiosk.BuildConfig
+import java.io.PrintWriter
+import java.io.StringWriter
 
 class PlaylistRepository(
     private val store: PlaylistStore,
     private val state: RuntimeStateStore? = null,
-    private val apiProvider: (String) -> KioskApi = { ApiFactory.create(it) }
+    calls: Call.Factory? = null,
+    apiProvider: ((String) -> KioskApi)? = null
 ) {
+    private val apiProvider: (String) -> KioskApi = apiProvider ?: { serverUrl ->
+        ApiFactory.create(serverUrl, requireNotNull(calls) { "Lipsește clientul HTTPS comun." })
+    }
     private val requestMutex = Mutex()
 
     suspend fun sync(
@@ -92,7 +100,15 @@ class PlaylistRepository(
     private fun safeError(error: Throwable): String = when (error) {
         is java.net.UnknownHostException -> "Server indisponibil. Se folosește conținutul local."
         is java.net.SocketTimeoutException -> "Conexiunea cu serverul a expirat."
-        is javax.net.ssl.SSLException -> "Conexiunea HTTPS nu a putut fi validată."
+        is javax.net.ssl.SSLException -> buildString {
+            append("Conexiunea HTTPS nu a putut fi validată.")
+            if (BuildConfig.DEBUG) {
+                append("\n\nCauză TLS completă (debug):\n")
+                append(StringWriter().also { writer ->
+                    PrintWriter(writer).use { error.printStackTrace(it) }
+                })
+            }
+        }
         is IllegalArgumentException -> error.message ?: "Date API invalide."
         else -> "Sincronizarea nu a reușit."
     }

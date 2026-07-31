@@ -1,13 +1,12 @@
 package ro.dmxconstruction.mediakiosk.data
 
-import okhttp3.OkHttpClient
+import okhttp3.Call
 import retrofit2.Response
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.POST
-import java.util.concurrent.TimeUnit
 
 interface KioskApi {
     @GET("api/kiosk/playlist/")
@@ -21,23 +20,9 @@ interface KioskApi {
 }
 
 object ApiFactory {
-    fun httpClient(): OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(5, TimeUnit.MINUTES)
-        .writeTimeout(5, TimeUnit.MINUTES)
-        .followRedirects(true)
-        .followSslRedirects(true)
-        .addInterceptor { chain ->
-            val request = chain.request().newBuilder()
-                .header("User-Agent", "MediaKiosk-Android/1.0")
-                .build()
-            chain.proceed(request)
-        }
-        .build()
-
-    fun create(serverUrl: String, client: OkHttpClient = httpClient()): KioskApi = Retrofit.Builder()
+    fun create(serverUrl: String, calls: Call.Factory): KioskApi = Retrofit.Builder()
         .baseUrl("${ServerUrl.normalize(serverUrl)}/")
-        .client(client)
+        .callFactory(calls)
         .addConverterFactory(GsonConverterFactory.create())
         .build()
         .create(KioskApi::class.java)
