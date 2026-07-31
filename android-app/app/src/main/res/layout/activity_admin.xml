@@ -15,23 +15,29 @@
             android:text="Pornire automată după restart" android:textColor="@color/white"
             android:textSize="17sp" android:checked="true" android:paddingStart="12dp" android:paddingEnd="12dp"
             android:layout_marginBottom="10dp" />
-        <Button android:id="@+id/syncButton" android:layout_width="match_parent" android:layout_height="56dp"
-            android:text="Sincronizează acum" android:textAllCaps="false" android:background="@drawable/button_background" android:layout_marginBottom="10dp" />
-        <Button android:id="@+id/cleanButton" android:layout_width="match_parent" android:layout_height="56dp"
-            android:text="Curăță fișierele neutilizate" android:textAllCaps="false" android:background="@drawable/button_background" android:layout_marginBottom="10dp" />
-        <Button android:id="@+id/settingsButton" android:layout_width="match_parent" android:layout_height="56dp"
-            android:text="Modifică setările" android:textAllCaps="false" android:background="@drawable/button_background" android:layout_marginBottom="10dp" />
-        <Button android:id="@+id/lockTaskButton" android:layout_width="match_parent" android:layout_height="56dp"
-            android:text="Activează Lock Task Mode" android:textAllCaps="false" android:background="@drawable/button_background" android:layout_marginBottom="10dp" />
-        <Button android:id="@+id/setHomeButton" android:layout_width="match_parent" android:layout_height="56dp"
-            android:text="Setează Media Kiosk ca aplicație principală" android:textAllCaps="false"
-            android:background="@drawable/button_background" android:layout_marginBottom="10dp" />
-        <Button android:id="@+id/systemLauncherButton" android:layout_width="match_parent" android:layout_height="56dp"
-            android:text="Revino la launcherul sistemului" android:textAllCaps="false"
-            android:background="@drawable/button_background" android:layout_marginBottom="10dp" />
-        <Button android:id="@+id/exitKioskButton" android:layout_width="match_parent" android:layout_height="56dp"
-            android:text="Ieși temporar din modul kiosk" android:textAllCaps="false" android:background="@drawable/button_background" android:layout_marginBottom="10dp" />
-        <Button android:id="@+id/backButton" android:layout_width="match_parent" android:layout_height="56dp"
-            android:text="Înapoi la conținut" android:textAllCaps="false" android:background="@drawable/button_background" />
+        <TextView android:id="@+id/syncButton" android:layout_width="match_parent" android:layout_height="56dp"
+            android:text="Sincronizează acum" android:textColor="@color/white" android:gravity="center"
+            android:clickable="true" android:focusable="true" android:background="@drawable/button_background" android:layout_marginBottom="10dp" />
+        <TextView android:id="@+id/cleanButton" android:layout_width="match_parent" android:layout_height="56dp"
+            android:text="Curăță fișierele neutilizate" android:textColor="@color/white" android:gravity="center"
+            android:clickable="true" android:focusable="true" android:background="@drawable/button_background" android:layout_marginBottom="10dp" />
+        <TextView android:id="@+id/settingsButton" android:layout_width="match_parent" android:layout_height="56dp"
+            android:text="Modifică setările" android:textColor="@color/white" android:gravity="center"
+            android:clickable="true" android:focusable="true" android:background="@drawable/button_background" android:layout_marginBottom="10dp" />
+        <TextView android:id="@+id/lockTaskButton" android:layout_width="match_parent" android:layout_height="56dp"
+            android:text="Activează Lock Task Mode" android:textColor="@color/white" android:gravity="center"
+            android:clickable="true" android:focusable="true" android:background="@drawable/button_background" android:layout_marginBottom="10dp" />
+        <TextView android:id="@+id/setHomeButton" android:layout_width="match_parent" android:layout_height="56dp"
+            android:text="Setează Media Kiosk ca aplicație principală" android:textColor="@color/white" android:gravity="center"
+            android:clickable="true" android:focusable="true" android:background="@drawable/button_background" android:layout_marginBottom="10dp" />
+        <TextView android:id="@+id/systemLauncherButton" android:layout_width="match_parent" android:layout_height="56dp"
+            android:text="Revino la launcherul sistemului" android:textColor="@color/white" android:gravity="center"
+            android:clickable="true" android:focusable="true" android:background="@drawable/button_background" android:layout_marginBottom="10dp" />
+        <TextView android:id="@+id/exitKioskButton" android:layout_width="match_parent" android:layout_height="56dp"
+            android:text="Ieși temporar din modul kiosk" android:textColor="@color/white" android:gravity="center"
+            android:clickable="true" android:focusable="true" android:background="@drawable/button_background" android:layout_marginBottom="10dp" />
+        <TextView android:id="@+id/backButton" android:layout_width="match_parent" android:layout_height="56dp"
+            android:text="Înapoi la conținut" android:textColor="@color/white" android:gravity="center"
+            android:clickable="true" android:focusable="true" android:background="@drawable/button_background" />
     </LinearLayout>
 </ScrollView>

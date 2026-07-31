@@ -4,6 +4,7 @@ import android.content.Context
 import android.widget.EditText
 import android.widget.Spinner
 import android.widget.Button
+import android.widget.TextView
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -38,7 +39,11 @@ class SetupActivityTest {
                 assertTrue(activity.findViewById<Spinner>(R.id.cacheSpinner).isShown)
                 assertTrue(activity.findViewById<Spinner>(R.id.orientationSpinner).isShown)
                 assertTrue(activity.findViewById<EditText>(R.id.pinInput).isShown)
-                assertFalse(activity.findViewById<Button>(R.id.saveButton).isEnabled)
+                val testAction = activity.findViewById<TextView>(R.id.testButton)
+                val saveAction = activity.findViewById<TextView>(R.id.saveButton)
+                assertTrue(testAction !is Button)
+                assertTrue(saveAction !is Button)
+                assertFalse(saveAction.isEnabled)
             }
         }
     }

@@ -7,6 +7,7 @@
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
 
     <application
+        android:name=".MediaKioskApplication"
         android:allowBackup="false"
         android:fullBackupContent="false"
         android:icon="@drawable/ic_media_kiosk"
@@ -15,6 +16,10 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.MediaKiosk"
         android:usesCleartextTraffic="false">
+        <activity
+            android:name=".diagnostics.CrashReportActivity"
+            android:exported="false"
+            android:theme="@style/Theme.MediaKiosk.Crash" />
         <activity
             android:name=".ui.AdminActivity"
             android:exported="false" />
@@ -65,5 +70,14 @@
                 <action android:name="android.intent.action.USER_UNLOCKED" />
             </intent-filter>
         </receiver>
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/crash_report_paths" />
+        </provider>
     </application>
 </manifest>

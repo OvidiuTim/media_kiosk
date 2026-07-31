@@ -55,6 +55,14 @@ Playerul rulează fullscreen, fără controale, menține ecranul pornit și reap
 
 Cache-ul privat este în `filesDir/media_cache/`. Descărcările sunt scrise în `.part`, pot continua prin HTTP Range, sunt validate SHA-256 și mutate atomic. Fișierele sunt identificate prin `media_id` și checksum, iar limita folosește LRU și păstrează cu prioritate playlistul activ. Dacă un material nu încape, este redat prin streaming. Ultimul playlist valid rămâne disponibil offline.
 
+## Diagnosticarea închiderilor neașteptate
+
+`MediaKioskApplication` instalează un `UncaughtExceptionHandler` încă din `attachBaseContext()`, înainte de `Application.onCreate()` și de fluxul normal al activităților. La o excepție necapturată, handlerul construiește și scrie sincron stack trace-ul complet în `filesDir/crash_reports/last_crash.txt`, sincronizează fișierul pe disc și abia apoi pasează excepția handlerului Android care închide procesul. Raportul conține data, threadul, versiunea Android, modelul, hardware-ul, ABI-ul și întregul lanț de excepții; nu conține cheia dispozitivului sau PIN-ul.
+
+La următoarea pornire, indiferent dacă intrarea este configurarea, playerul sau administrarea, aplicația afișează înaintea fluxului normal pagina **Aplicația s-a închis neașteptat**. Raportul poate fi copiat sau partajat ca text și ca fișier prin `FileProvider`, fără permisiune de stocare. **Încearcă din nou** șterge raportul și revine la fluxul obișnuit; dacă aplicația este configurată, configurarea este sărită și se deschide playerul.
+
+Pagina de diagnostic folosește numai `android.app.Activity` și componente platformă disponibile în API 22. Un marker intern împiedică handlerul să suprascrie raportul original dacă pagina de diagnostic se închide ea însăși cu eroare; următoarea pornire ocolește pagina o singură dată, evitând o buclă de crash. Handlerul Java/Kotlin nu poate raporta terminări native (`SIGSEGV`), ANR, opriri din lipsă de memorie sau întreruperea alimentării.
+
 ## Administrare ascunsă
 
 Apasă rapid de cinci ori colțul stânga-sus al playerului și introdu PIN-ul. Ecranul administrativ arată dispozitivul, serverul, numai ultimele patru caractere ale cheii, playlistul și versiunea, sincronizarea, heartbeatul, internetul, cache-ul, starea ultimei porniri, Home și Lock Task. De aici se poate sincroniza, curăța cache-ul, modifica setările, controla pornirea automată, deschide selectorul Home, activa explicit un Lock Task deja autorizat sau ieși temporar din kiosk.
@@ -177,6 +185,22 @@ Versiunile au fost alese după metadatele AAR din Google Maven și după `checkD
 
 Nu se folosește `tools:overrideLibrary`, Room, Compose, WorkManager sau un TrustManager permisiv.
 
+Auditul startup-ului pentru Android 5.1 include:
+
+- temele și toate drawable-urile folosesc resurse disponibile în API 22; tema de diagnostic este `android:style/Theme.Material.NoActionBar`, disponibilă din API 21;
+- proiectul nu importă `java.time`; data raportului folosește `SimpleDateFormat`;
+- compilarea Java/Kotlin 17 trece prin desugaringul D8 al Android Gradle Plugin. Nu este necesar `coreLibraryDesugaring`, deoarece sursele nu folosesc API-uri de bibliotecă Java absente din API 22;
+- `networkSecurityConfig` este folosit în API 24+, iar `usesCleartextTraffic` în API 23+. Android 5.1 le ignoră în mod compatibil; pe API 22, `ServerUrl` și validarea playlistului acceptă numai URL-uri HTTPS, iar traficul folosește OkHttp;
+- `lockTaskMode` din manifest este ignorat pe API 22, iar codul folosește fallbackul `ActivityManager.isInLockTaskMode` disponibil în această versiune;
+- manifestele AAR verificate declară `minSdk 19` pentru Media3 ExoPlayer/UI 1.4.1 și Core KTX 1.13.1, respectiv `minSdk 21` pentru AppCompat 1.7.1;
+- un test Robolectric configurat explicit cu SDK 22 construiește `SetupActivity`, pagina de diagnostic și un `KioskActivity` configurat, inclusiv instanțierea Media3 `ExoPlayer`.
+
+### Remediere pentru firmware Rockchip Android 5.1.1
+
+Pe tableta rk3288, primul `<Button>` din `activity_setup.xml`, `testButton` cu textul **Testează conexiunea**, se închidea în constructor înainte de afișarea ecranului. În sursa AOSP Android 5.1.1, linia raportată `TextView.java:1015` este citirea `fontFamily = a.getString(attr)`. Aplicația furniza `android:fontFamily="sans"` în `Theme.MediaKiosk`, iar tagul `Button` era substituit de AppCompat cu `AppCompatButton` și primea lanțul implicit `buttonStyle → Widget.AppCompat.Button → android:textAppearance`. Firmware-ul Rockchip interpreta greșit indexul stringului din `TypedArray` și încerca indexul 667 într-un `StringBlock` cu 41 intrări.
+
+Tema nu mai declară `android:fontFamily`. Acțiunile din configurare și administrare sunt `TextView` simple, clickable și focusable, cu background selector local compatibil API 22; nu au `style`, `textAppearance`, `fontFamily` sau `textAllCaps`. Și dialogurile aplicației folosesc acțiuni `TextView` programatice, nu butoanele interne ale `AlertDialog`. Testele API 22 inspectează XML-ul binar compilat, interzic tagul `Button` și atributele text problematice pe toate acțiunile, apoi inflează efectiv configurarea, administrarea și dialogul sigur.
+
 ## Teste
 
 Testele JVM nu contactează producția. MockWebServer verifică endpointurile, headerele, JSON-ul, ETag/304 și downloadurile. Sunt acoperite validarea/ordonarea, persistența și schimbarea atomică, checksum, `.part`, Range, hit/miss, limită/LRU, fallback offline, backoff, UUID/URL, hash/salt PIN, blocarea după PIN greșit, boot configurat/neconfigurat, autostart activ/inactiv, Direct Boot, pornire offline, politica Android modern, selectorul Home și ieșirea protejată.
@@ -195,11 +219,11 @@ Testele instrumentate se compilează cu:
 
 Ele verifică ecranul de configurare, navigarea către kiosk fără a folosi producția, starea offline, immersive flags, cele cinci apăsări ascunse și secvențele imagine–imagine, imagine–video, video–imagine și repetarea cozii.
 
-Verificare locală din 30 iulie 2026:
+Verificare locală din 31 iulie 2026:
 
-- 37 teste JVM: trecute;
-- 11 teste instrumentate pe emulator Android API 37: trecute;
-- `lintDebug`: trecut, fără erori;
+- 48 teste JVM: trecute; 11 teste rulează explicit cu profil API 22, inclusiv inflation și auditul acțiunilor/dialogurilor;
+- 14 teste instrumentate pe emulator Android API 37: trecute;
+- `lintDebug`: trecut, fără erori și fără probleme `NewApi`;
 - `assembleDebug`: trecut, APK debug generat;
 - manifest/APK: `minSdk 22`, `targetSdk 34`, `compileSdk 34`.
 

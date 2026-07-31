@@ -1,6 +1,5 @@
 package ro.dmxconstruction.mediakiosk.ui
 
-import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.net.ConnectivityManager
@@ -21,6 +20,7 @@ import ro.dmxconstruction.mediakiosk.data.PlaylistStore
 import ro.dmxconstruction.mediakiosk.data.RuntimeStateStore
 import ro.dmxconstruction.mediakiosk.data.SyncResult
 import ro.dmxconstruction.mediakiosk.databinding.ActivityAdminBinding
+import ro.dmxconstruction.mediakiosk.diagnostics.CrashReportNavigator
 import ro.dmxconstruction.mediakiosk.kiosk.KioskMode
 import ro.dmxconstruction.mediakiosk.kiosk.HomeLauncherController
 import java.io.File
@@ -34,6 +34,7 @@ class AdminActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (CrashReportNavigator.redirectIfNeeded(this)) return
         binding = ActivityAdminBinding.inflate(layoutInflater)
         setContentView(binding.root)
         configStore = ConfigStore(this)
@@ -100,15 +101,16 @@ class AdminActivity : AppCompatActivity() {
     }
 
     private fun showHomeSelectionExplanation() {
-        AlertDialog.Builder(this)
-            .setTitle("Media Kiosk ca aplicație principală")
-            .setMessage("În selectorul Android alege Media Kiosk, apoi opțiunea Întotdeauna. Aplicația va fi deschisă automat după pornirea tabletei.")
-            .setNegativeButton("Anulează", null)
-            .setPositiveButton("Deschide selectorul") { _, _ ->
+        SafeActionDialog.create(
+            context = this,
+            title = "Media Kiosk ca aplicație principală",
+            message = "În selectorul Android alege Media Kiosk, apoi opțiunea Întotdeauna. Aplicația va fi deschisă automat după pornirea tabletei.",
+            positiveLabel = "Deschide selectorul"
+        ) { handle ->
+                handle.dialog.dismiss()
                 HomeLauncherController.enableHomeCandidate(this)
                 openSettings(HomeLauncherController.createHomeSelectionIntent(this))
-            }
-            .show()
+        }.show()
     }
 
     private fun showSystemLauncherPinDialog() {
@@ -116,28 +118,25 @@ class AdminActivity : AppCompatActivity() {
             inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
             hint = "PIN administrare"
         }
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("Revino la launcherul sistemului")
-            .setMessage("Confirmă PIN-ul administrativ pentru a dezactiva Media Kiosk ca aplicație Home.")
-            .setView(input)
-            .setNegativeButton("Anulează", null)
-            .setPositiveButton("Continuă", null)
-            .create()
-        dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                when (val result = HomeLauncherController.disableAfterPin(this, input.text.toString())) {
-                    PinResult.Valid -> {
-                        KioskMode.exit(this)
-                        dialog.dismiss()
-                        openSettings(HomeLauncherController.createSystemHomeSettingsIntent())
-                    }
-                    PinResult.Invalid -> dialog.setMessage("PIN incorect. Media Kiosk rămâne aplicația principală.")
-                    is PinResult.Locked -> dialog.setMessage(
-                        "Prea multe încercări. Reîncearcă în ${result.remainingMs / 1000 + 1} secunde."
-                    )
+        val dialog = SafeActionDialog.create(
+            context = this,
+            title = "Revino la launcherul sistemului",
+            message = "Confirmă PIN-ul administrativ pentru a dezactiva Media Kiosk ca aplicație Home.",
+            customView = input,
+            positiveLabel = "Continuă"
+        ) { handle ->
+            when (val result = HomeLauncherController.disableAfterPin(this, input.text.toString())) {
+                PinResult.Valid -> {
+                    KioskMode.exit(this)
+                    handle.dialog.dismiss()
+                    openSettings(HomeLauncherController.createSystemHomeSettingsIntent())
                 }
-                input.text.clear()
+                PinResult.Invalid -> handle.setMessage("PIN incorect. Media Kiosk rămâne aplicația principală.")
+                is PinResult.Locked -> handle.setMessage(
+                    "Prea multe încercări. Reîncearcă în ${result.remainingMs / 1000 + 1} secunde."
+                )
             }
+            input.text.clear()
         }
         dialog.show()
     }

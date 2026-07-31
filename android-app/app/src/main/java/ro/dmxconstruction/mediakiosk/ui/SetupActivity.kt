@@ -17,6 +17,7 @@ import ro.dmxconstruction.mediakiosk.data.ScreenOrientation
 import ro.dmxconstruction.mediakiosk.data.ServerUrl
 import ro.dmxconstruction.mediakiosk.data.SyncResult
 import ro.dmxconstruction.mediakiosk.databinding.ActivitySetupBinding
+import ro.dmxconstruction.mediakiosk.diagnostics.CrashReportNavigator
 
 class SetupActivity : AppCompatActivity() {
     private lateinit var binding: ActivitySetupBinding
@@ -27,6 +28,7 @@ class SetupActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (CrashReportNavigator.redirectIfNeeded(this)) return
         configStore = ConfigStore(this)
         if (configStore.isConfigured() && !isEditing) {
             openKiosk()

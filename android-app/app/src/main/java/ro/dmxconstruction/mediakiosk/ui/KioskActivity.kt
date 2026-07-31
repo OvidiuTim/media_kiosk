@@ -1,6 +1,5 @@
 package ro.dmxconstruction.mediakiosk.ui
 
-import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.graphics.drawable.Drawable
@@ -41,6 +40,7 @@ import ro.dmxconstruction.mediakiosk.data.RuntimeStateStore
 import ro.dmxconstruction.mediakiosk.data.ScreenOrientation
 import ro.dmxconstruction.mediakiosk.data.SyncResult
 import ro.dmxconstruction.mediakiosk.databinding.ActivityKioskBinding
+import ro.dmxconstruction.mediakiosk.diagnostics.CrashReportNavigator
 import ro.dmxconstruction.mediakiosk.kiosk.KioskMode
 import java.io.File
 
@@ -69,6 +69,7 @@ class KioskActivity : AppCompatActivity(), Player.Listener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (CrashReportNavigator.redirectIfNeeded(this)) return
         configStore = ConfigStore(this)
         val config = configStore.load()
         if (config == null) {
@@ -133,7 +134,7 @@ class KioskActivity : AppCompatActivity(), Player.Listener {
         wasStopped = true
         imageJob?.cancel()
         imageJob = null
-        player.pause()
+        if (::player.isInitialized) player.pause()
         super.onStop()
     }
 
@@ -346,34 +347,35 @@ class KioskActivity : AppCompatActivity(), Player.Listener {
             inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
             hint = "PIN administrare"
         }
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("Acces administrativ")
-            .setView(input)
-            .setNegativeButton("Anulează", null)
-            .setPositiveButton("Deschide", null)
-            .create()
-        dialog.setOnDismissListener { isAdminDialogShowing = false }
-        dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                when (val result = configStore.verifyPin(input.text.toString())) {
-                    PinResult.Valid -> {
-                        dialog.dismiss()
-                        startActivity(Intent(this, AdminActivity::class.java))
-                    }
-                    PinResult.Invalid -> dialog.setMessage("PIN incorect.")
-                    is PinResult.Locked -> dialog.setMessage("Prea multe încercări. Reîncearcă în ${result.remainingMs / 1000 + 1} secunde.")
+        val dialog = SafeActionDialog.create(
+            context = this,
+            title = "Acces administrativ",
+            customView = input,
+            positiveLabel = "Deschide"
+        ) { handle ->
+            when (val result = configStore.verifyPin(input.text.toString())) {
+                PinResult.Valid -> {
+                    handle.dialog.dismiss()
+                    startActivity(Intent(this, AdminActivity::class.java))
                 }
-                input.text.clear()
+                PinResult.Invalid -> handle.setMessage("PIN incorect.")
+                is PinResult.Locked -> handle.setMessage(
+                    "Prea multe încercări. Reîncearcă în ${result.remainingMs / 1000 + 1} secunde."
+                )
             }
+            input.text.clear()
         }
+        dialog.setOnDismissListener { isAdminDialogShowing = false }
         dialog.show()
     }
 
     override fun onDestroy() {
         imageJob?.cancel()
-        binding.playerView.player = null
-        player.removeListener(this)
-        player.release()
+        if (::binding.isInitialized) binding.playerView.player = null
+        if (::player.isInitialized) {
+            player.removeListener(this)
+            player.release()
+        }
         super.onDestroy()
     }
 
